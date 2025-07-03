@@ -1,0 +1,37 @@
+---
+title: "Polyandry effects during pre- and post-pollination"
+format: 
+  html:
+    theme: cosmo
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: false
+editor: visual
+runtime: shiny
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+csl: styles/proceedings-of-the-royal-society-b.csl
+---
+
+```{r setup, include=FALSE}
+# Remove messages containing "Attachement du package"
+knitr::knit_hooks$set(message = function(x, options) {
+  if (grepl("Attachement du package", x)) {
+    return("")
+  }
+  return(x)
+})
+
+library(ggplot2)
+library(tidyverse)
+```
+
+Visualize the pipeline analyses:
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+targets::tar_visnetwork()
+```

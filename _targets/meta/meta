@@ -1,0 +1,21 @@
+name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
+data_flower|stem|e41300bff4e84028|1e614b53c4b42c44|579ce51e1413403c|2086403845||t20272.2667923708s|s1464800b|1464800|rds|local|vector|||0.247||
+data_both_sexes|stem|55d494d709705deb|0a15d50a3a147eb3|26a80935632bb781|1809313910||t20272.2672079656s|s519060b|519060|rds|local|vector|||0.123||
+data_id|stem|713aa1594ad3a5e9|30aee8924339997b|b1c5aa4c984f0a61|1925937001||t20272.2672089494s|s205958b|205958|rds|local|vector|||0.053||
+index|stem|0eca8c7db0b564b8|ac7bb895268bf3b8|2c530c1562a7fbd1|554519753|index_files*index.html*index.qmd|t20272.2679837447s|s26016b|26016|file|local|vector|||3.434||
+data_proxies|stem|3f4d5a04e7bff13e|f3d59546d109a8c4|e2e30b269148377f|-656559894||t20272.2682902058s|s284471b|284471|rds|local|vector|||0.187||
+common_theme|stem|6935cb7b88ddbf74|b3d48bfa03c63227|3ca182a676c4f1e0|-139077372||t20272.2881502054s|s507b|507|rds|local|vector|||0.075||
+prop_non_abort|stem|ee3d61d1ffe22e6b|02a0c76c27a6c317|87f9d2039fbb58bf|342309872||t20272.5312912811s|s541121b|541121|rds|local|vector|||1.673||
+prop_germ|stem|19a7ce0a1847446d|f21d3e00a4115551|f658793c6cf0077e|624508569||t20272.5454887654s|s817079b|817079|rds|local|vector|||1.641|Model failed to converge with maxgrad  0.00205088 tol  0.002, component 1|
+seed_set|stem|be4c8e01e0c7798b|a5bcb993db65f7d2|d288114e019d01b9|-1786349320||t20272.5455004781s|s543745b|543745|rds|local|vector|||0.867||
+get_seed_set|function|f468876a38d9007a
+load_data_id|function|33898ae165ae30d2
+get_data_proxies|function|f35ce0452414db8b
+load_data_both_sexes|function|ed521c09a8890d0c
+get_prop_non_abort|function|7d4a33bd4b4c229f
+.Random.seed|object|459bfae4773891d5
+get_prop_germ|function|8d69ccc877f9d341
+get_common_theme|function|f8cd189271dbc6a7
+load_data_flower|function|c53359fe012db252
+get_weight|function|e8dfb1a189064521
+weight|stem|ecd1cf8c6e2c1593|74520f116ba990d2|830fdc7f87b25492|-990128353||t20272.5491824791s|s679431b|679431|rds|local|vector|||1.248||

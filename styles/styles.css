@@ -1,0 +1,8 @@
+.quarto-figure {
+    text-align: center; /* Centre tout le contenu de la figure */
+}
+
+.quarto-figure figcaption {
+    text-align: center; /* Centre uniquement la légende */
+    font-style: italic; /* (Optionnel) Rend la légende en italique */
+}
