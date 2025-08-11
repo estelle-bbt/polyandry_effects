@@ -304,6 +304,7 @@ get_prop_non_abort <- function(data_proxy_av, common_theme){
   ggsave("figures/plot_oMS_av_fem.jpeg",plot_oMS_av_fem,width=4,height=4, device = png,bg="white")
   
   
+  
   return(list(plot_gms_av = plot_gMS_av_fem,
               plot_oms_av = plot_oMS_av_fem))
 }
