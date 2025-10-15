@@ -24,7 +24,7 @@ dt_sum <- dt %>%
   
 scaleFUN <- function(x){sprintf("%.1f", x)}
 
-# controlling for oms at the flower scale (complete dataset) --------------
+# 1) controlling for oms at the flower scale (complete dataset) --------------
 
 # prop avorted
 coms_av_gms0 <- lme4::glmer(data = dt %>% filter(!is.na(gMS)), cbind(nbGr, nbAv) ~ gMS * poll_treat_factor + import_nb_part_ID_out_co10  + (1|session:ID_full), family = binomial)
@@ -188,7 +188,7 @@ anova(coms_weight_oms1,coms_weight_oms3)
 # 5 effects
 
 
-# controlling further for pl (reduced dataset) ----------------------------
+# 2) controlling further for pl (reduced dataset) ----------------------------
 
 # prop avorted
 comspl_av_gms0 <- lme4::glmer(data = dt %>% filter(!is.na(gMS)), cbind(nbGr,nbAv) ~ gMS*poll_treat_factor+import_nb_part_ID_out_co10+pl  + (1|session:ID_full),family = binomial)
@@ -260,7 +260,7 @@ anova(comspl_weight_oms1,comspl_weight_oms3)
 # not any effect with the reduced dataset with pl
 
 
-# controlling for nothing -------------------------------------------------
+# 3) controlling for nothing -------------------------------------------------
 
 # prop avorted
 not_av_gms0 <- lme4::glmer(data = dt %>% filter(!is.na(gMS)), cbind(nbGr,nbAv) ~ gMS*poll_treat_factor  + (1|session:ID_full),family = binomial)
@@ -332,7 +332,7 @@ anova(not_weight_oms1,not_weight_oms3)
 # 3 effects
 
 
-# new analyses : focusing on the flower scale to complete those at the individual scale --------
+# 4) focusing on the flower scale to complete those at the individual scale --------
 
 test <- dt %>% filter(gMS_fem_out > 1)
 
@@ -411,7 +411,7 @@ anova(coms_weight_oms1,coms_weight_oms3)
 
 
 
-# new analyses bis : flower scale as before but with individual data too --------
+# 5) flower scale as before but with individual data too --------
 
 # table_for_gms <- dt %>% filter(gMS_fem_out >= 1) # only outcrossing
 # table_for_gms <- dt %>% filter(nGenot > 1) # more than one seed genotyped
@@ -595,7 +595,7 @@ anova(coms_weight_oms4,coms_weight_oms7) # flower
 anova(coms_weight_oms4,coms_weight_oms8) # flower
 
 
-# TO REMOVE : new analyses ter : same as bis but with ttt only as random effect and testing for it --------
+# 6) same as bis but with ttt only as random effect and testing for it --------
 
 # table_for_gms <- dt %>% filter(gMS_fem_out >= 1) # only outcrossing
 # table_for_gms <- dt %>% filter(nGenot > 1) # more than one seed genotyped
@@ -769,7 +769,7 @@ anova(coms_weight_oms4,coms_weight_oms8) # flower
 
 
 
-# final analyses (?) : as analysis bis but with pl in interaction for gms too --------
+# 7) as analysis 5 but with pl in interaction for gms too --------
 
 # table_for_gms <- dt %>% filter(gMS_fem_out >= 1) # only outcrossing
 # table_for_gms <- dt %>% filter(nGenot > 1) # more than one seed genotyped
@@ -1065,6 +1065,9 @@ anova(coms_weight_oms4,coms_weight_oms8) # pl
 
 performance::check_singularity(coms_weight_oms0) # ok
 performance::check_collinearity(coms_weight_oms0) # ok
+
+
+# 8) final analyses -------------------------------------------------------
 
 
 # plot id -----------------------------------------------------------------

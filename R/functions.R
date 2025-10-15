@@ -14,17 +14,69 @@
 load_data_flower <- function(file_path){
   
   data_flower <- read.table(file_path,head=T) |>
-    mutate(poll_treat_factor=as.factor(case_when(poll_treat==1~"low",
+    mutate(ttt=as.factor(case_when(poll_treat==1~"low",
                                                  poll_treat==2~"medium",
                                                  TRUE~"high"))) |>
-    mutate(poll_treat_factor=forcats::fct_relevel(poll_treat_factor, c("low","medium","high")))
+    mutate(ttt=forcats::fct_relevel(ttt, c("low","medium","high"))) |>
+    rename(id = ID_full,
+           nb_ab = nbAv,
+           nb_ov = nbOv,
+           nb_seed = nbGr_SR,
+           seed_weight = poids_sd,
+           nb_germ = nbGr_germ,
+           nb_sown = nbGr_semis)
   
   return(data_flower)
 }
 
-#' Read data about both sexual functions
+#' #' Read data about both sexual functions
+#' #'
+#' #' @description 
+#' #'
+#' #' @param 
+#' #'
+#' #' @return 
+#' #' 
+#' #' @import dplyr
+#' #' 
+#' #' @export
+#' 
+#' load_data_both_sexes <- function(file_path, c = "10"){
+#'   
+#'   data_both_sexes <- read.table(file_path,head=T) |>
+#'     mutate(type=as.factor(type),
+#'            poll_treat_factor=as.factor(poll_treat_factor)) |>
+#'     mutate(type=relevel(type, ref = "fem"),
+#'            poll_treat_factor=forcats::fct_relevel(poll_treat_factor, c("low","medium","high"))) |>
+#'     mutate(loss_MS = 100-(100*gMS/get(paste0("nb_part_ID_out_co",c))))
+#'   
+#'   return(data_both_sexes)
+#' }
+
+#' Estimate q index
 #'
 #' @description 
+#'
+#' @param data 
+#'
+#' @return 
+#' 
+#' @import dplyr
+#' 
+#' @export
+
+q_index <- function(x) {
+  n <- length(x)
+  N <- sum(x)
+  if (N <= 1) return(NA)  # to avoid dividing by zero
+  sum_xi <- sum(x * (x - 1))
+  I_d <- (sum_xi) / (N * (N - 1))
+  return(I_d)
+}
+
+#' Get table with oms/gms at the id and flower scale
+#'
+#' @description filtering seeds that cannot be there
 #'
 #' @param 
 #'
@@ -34,16 +86,230 @@ load_data_flower <- function(file_path){
 #' 
 #' @export
 
-load_data_both_sexes <- function(file_path, c = "10"){
+get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_detflo.txt", file_path_gen = "data/fix10_paternities_ABPOLL.txt"){
   
-  data_both_sexes <- read.table(file_path,head=T) |>
-    mutate(type=as.factor(type),
-           poll_treat_factor=as.factor(poll_treat_factor)) |>
-    mutate(type=relevel(type, ref = "fem"),
-           poll_treat_factor=forcats::fct_relevel(poll_treat_factor, c("low","medium","high"))) |>
-    mutate(loss_MS = 100-(100*gMS/get(paste0("nb_part_ID_out_co",c))))
+  # couples with observed visits only (carry-over 10)
+  obs_clean <- read.table(file_path_obs,head=T) |>
+    filter(!session %in% c("5.FA1","5.MO1"))  |>
+    select(session,ID_full_foc,ID_full_part,id_flow_part,export_nb_visit_co10) |>
+    filter(ID_full_foc != ID_full_part)  |>
+    filter(!(is.na(export_nb_visit_co10)|export_nb_visit_co10==0)) |>
+    mutate(couple_obs = paste0(ID_full_foc,"_",id_flow_part)) |>
+    rename(id = ID_full_part,
+           id_flow = id_flow_part)
   
-  return(data_both_sexes)
+  # filtering only observed contact
+  gen_clean <- read.table(file_path_gen,head=T) |>
+    filter(known_id != candidate_id) |>
+    mutate(offspring_id = stringr::str_remove(offspring_id, pattern = "_run3"),
+           offspring_id = stringr::str_remove(offspring_id, pattern = "a"),
+           offspring_id = stringr::str_remove(offspring_id, pattern = "b")) |>
+    mutate(flower_id = sub("_[^_]+$", "", offspring_id)) |>
+    mutate(couple_gen = paste0(candidate_id,"_",flower_id)) |>
+    filter(couple_gen %in% obs_clean$couple_obs)  |>
+    rename(id = known_id,
+           id_flow = flower_id)
+  
+  q_obs_id <- obs_clean |>
+    group_by(id) %>%
+    summarise(
+      q_obs = q_index(export_nb_visit_co10),
+      .groups = "drop"
+    ) 
+  
+  q_gen_id <- gen_clean |>
+    group_by(id,candidate_id) |>
+    summarise(genot_couple = n()) |>
+    group_by(id) |>
+    summarise(
+      q_gen = q_index(genot_couple),
+      .groups = "drop"
+    )
+  
+  q_obs_flower <- obs_clean |>
+    group_by(id, id_flow) %>%
+    summarise(
+      q_obs = q_index(export_nb_visit_co10),
+      .groups = "drop"
+    ) 
+  
+  q_gen_flower <- gen_clean |>
+    group_by(id, id_flow, candidate_id) |>
+    summarise(genot_couple = n()) |>
+    group_by(id, id_flow) |>
+    summarise(
+      q_gen = q_index(genot_couple),
+      .groups = "drop"
+    )
+  
+  oms_gms_flower <- obs_clean |> 
+    group_by(id,id_flow) |>
+    summarise(oms = n_distinct(ID_full_foc))  |>
+    left_join(gen_clean |>
+                group_by(id, id_flow) |>
+                summarise(gms = n_distinct(candidate_id))) |>
+    left_join(q_obs_flower) |>
+    left_join(q_gen_flower) |>
+    mutate(ratio_q = q_gen / q_obs)
+  
+  oms_gms_id <- obs_clean |> 
+    group_by(id) |>
+    summarise(oms = n_distinct(ID_full_foc))  |>
+    left_join(gen_clean |>
+                group_by(id) |>
+                summarise(gms = n_distinct(candidate_id))) |>
+    left_join(q_obs_id) |>
+    left_join(q_gen_id) |>
+    mutate(ratio_q = q_gen / q_obs)
+  
+  return(list(oms_gms_flower = oms_gms_flower,
+         oms_gms_id = oms_gms_id))
+}
+
+#' #' Get data proxies female rs at the individual level
+#' #'
+#' #' @description 
+#' #'
+#' #' @param 
+#' #'
+#' #' @return 
+#' #' 
+#' #' @import dplyr
+#' #' 
+#' #' @export
+
+get_data_proxy_id <- function(data_flower){
+
+  # resume information at the ID level to avoid pseudoreplication
+  # we have to only retain row for which we have all informations according to each analyses
+  # to avoid estimating each variable on a different number of sample for each individual
+
+  # proportion non-aborted
+  data_proxy_ab <- data_flower %>%
+    filter(!(is.na(nb_ab)|is.na(nb_seed))) %>%
+    group_by(id,session,ttt) %>%
+    summarise(nb_ab_sum_ab=sum(nb_ab,na.rm=T),
+              nb_seed_sum_ab=sum(nb_seed,na.rm=T))
+  
+  # seed-set
+  data_proxy_ss <- data_flower %>%
+    filter(!(is.na(nb_ov)|is.na(nb_seed))) %>%
+    group_by(id,session,ttt) %>%
+    summarise(nb_ov_sum_ss=sum(nb_ov,na.rm=T),
+              nb_seed_sum_ss=sum(nb_seed,na.rm=T))
+  
+  # proportion germinated
+  data_proxy_germ <- data_flower %>%
+    filter(!(is.na(nb_sown)|is.na(nb_germ))) %>%
+    group_by(id,session,ttt) %>%
+    summarise(nb_sown_sum_germ=sum(nb_sown,na.rm=T),
+              nb_germ_sum_germ=sum(nb_germ,na.rm=T))
+  
+  # proportion germinated
+  data_proxy_weight <- data_flower %>%
+    group_by(id,session,ttt) %>%
+    summarise(mean_seed_weight=mean(seed_weight,na.rm=T))
+  
+  data_proxy_id <- data_proxy_ab |>
+    full_join(data_proxy_ss) |>
+    full_join(data_proxy_germ) |>
+    full_join(data_proxy_weight) |>
+    ungroup() |>
+    mutate_all(~ifelse(is.nan(.), NA, .)) |> # for id without seed weight
+    filter(if_any(4:10, ~ !is.na(.)))  # remove id without data
+    
+  return(data_proxy_id)
+}
+
+#' #' Get final data table with rs proxy and oms/gms
+#' #'
+#' #' @description 
+#' #'
+#' #' @param 
+#' #'
+#' #' @return 
+#' #' 
+#' #' @import dplyr
+#' #' 
+#' #' @export
+
+get_data_final <- function(oms_gms_flower, oms_gms_id, data_flower, data_proxy_id){
+  
+  data_final_flower <- data_flower |>
+    select(id, id_flow, session, ttt, nb_ab, nb_ov, nb_seed, seed_weight, nb_sown, nb_germ, pl) |>
+    left_join(oms_gms_flower)
+  
+  data_final_id <- data_proxy_id |>
+    left_join(oms_gms_id)
+  
+  return(list(data_final_flower = data_final_flower,
+              data_final_id = data_final_id))
+}
+
+#' Variance intra vs inter pollen load
+#'
+#' @description
+#'
+#' @param
+#'
+#' @return
+#'
+#' @import dplyr
+#'
+#' @export
+
+get_var_intra_inter <- function(data_final_flower){
+  
+  # intra-class correlation coefficient
+  
+  model_pl <- lme4::glmer(data = data_final_flower, pl ~ 1 + (1 | id) + (1|session), family = "poisson")
+  
+  model_pl <- lme4::glmer(data = data_final_flower, pl ~ 1 + (1|session) + (1 |session:id), family = "poisson")
+  
+  
+  vc <- as.data.frame(lme4::VarCorr(model_pl))
+  var_id <- vc[vc$grp == "session:id", "vcov"]
+  var_session <- vc[vc$grp == "session", "vcov"]
+  
+  icc_id <- var_id / (var_id + var_session)
+  # 0.77 not very far from 1 -> var intra < var inter
+  # ok to resume pl with its mean at the individual level
+  
+  return(icc_id)
+}
+
+#' Statistic models
+#'
+#' @description
+#'
+#' @param
+#'
+#' @return
+#'
+#' @import dplyr
+#'
+#' @export
+
+get_stat_flower <- function(data_final_flower){
+  
+  
+  model_oms_q_flower_0 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
+  model_oms_q_flower_1 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
+  model_oms_q_flower_2 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
+  model_oms_q_flower_3 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl + (1|session) + (1|session:id))
+  model_oms_q_flower_4 <- lme4::lmer(data = data_final_flower, ratio_q ~ ttt + pl + (1|session) + (1|session:id))
+  model_oms_q_flower_5 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + pl + (1|session) + (1|session:id))
+  model_oms_q_flower_6 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + (1|session) + (1|session:id))
+  anova(model_oms_q_flower_0, model_oms_q_flower_1) # sign oms * ttt
+  anova(model_oms_q_flower_0, model_oms_q_flower_2) # ns pl * ttt
+  anova(model_oms_q_flower_3, model_oms_q_flower_4) # sign oms
+  anova(model_oms_q_flower_3, model_oms_q_flower_5) # marg sign ttt
+  anova(model_oms_q_flower_3, model_oms_q_flower_6) # ns pl
+  anova(update(model_oms_q_flower, . ~ . - oms), update(model_oms_q_flower, . ~ . - oms:ttt))
+  
+  model_oms_flower_ab <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "poisson")
+
+  return()
 }
 
 #' #' Read data at the individual level
@@ -73,78 +339,6 @@ load_data_both_sexes <- function(file_path, c = "10"){
 #'   return(data_id)
 #' }
 #' 
-#' #' Get data proxies of female reproductive success
-#' #'
-#' #' @description 
-#' #'
-#' #' @param 
-#' #'
-#' #' @return 
-#' #' 
-#' #' @import dplyr
-#' #' 
-#' #' @export
-#' 
-#' get_data_proxies <- function(data_flower, data_both_sexes, data_id, c = "10"){
-#'   
-#'   # resume information at the ID level to avoid pseudoreplication
-#'   # we have to only retain row for which we have all informations according to each analyses
-#'   # to avoid estimating each variable on a different number of sample for each individual
-#'   
-#'   # to check results without female that have less than 10 genotyped seeds
-#'   # list_filt <- data_id %>%
-#'   #   filter(nGenot>=10) %>%
-#'   #   pull(ID_full)
-#'   
-#'   data_proxy_ovav <- data_flower %>%
-#'     # filter(ID_full %in% list_filt) %>%
-#'     filter(!(is.na(nbOv)|is.na(nbAv)|is.na(nbGr_SR))) %>%
-#'     group_by(ID_full,session,poll_treat_factor) %>%
-#'     summarise(nbOv_sum=sum(nbOv,na.rm=T),
-#'               nbAv_sum=sum(nbAv,na.rm=T),
-#'               nbGr_sum=sum(nbGr_SR,na.rm=T)) %>%
-#'     left_join(data_both_sexes %>% # data_both_sexes is the table with variables correctly implement as 0 or NA
-#'                 filter(type=="fem") %>%
-#'                 select(ID_full,gMS,paste0("nb_part_ID_out_co",c)) %>%
-#'                 rename(oMS=paste0("nb_part_ID_out_co",c))) %>%
-#'     left_join(data_id %>% select(ID_full, prop_self)) 
-#'   
-#'   data_proxy_ov <- data_flower %>%
-#'     # filter(ID_full %in% list_filt) %>%
-#'     filter(!(is.na(nbOv)|is.na(nbGr))) %>%
-#'     group_by(ID_full,session,poll_treat_factor) %>%
-#'     summarise(nbOv_sum=sum(nbOv,na.rm=T),
-#'               nbGr_sum=sum(nbGr_SR,na.rm=T)) %>%
-#'     left_join(data_both_sexes %>% # data_both_sexes is the table with variables correctly implement as 0 or NA
-#'                 filter(type=="fem") %>%
-#'                 select(ID_full,gMS,paste0("nb_part_ID_out_co",c)) %>%
-#'                 rename(oMS=paste0("nb_part_ID_out_co",c))) %>%
-#'     left_join(data_id %>% select(ID_full, prop_self))
-#'   
-#'   data_proxy_av <- data_flower %>%
-#'     # filter(ID_full %in% list_filt) %>%
-#'     filter(!(is.na(nbAv)|is.na(nbGr))) %>%
-#'     group_by(ID_full,session,poll_treat_factor) %>%
-#'     summarise(nbAv_sum=sum(nbAv,na.rm=T),
-#'               nbGr_sum=sum(nbGr_SR,na.rm=T)) %>%
-#'     left_join(data_both_sexes %>% # data_both_sexes is the table with variables correctly implement as 0 or NA
-#'                 filter(type=="fem") %>%
-#'                 select(ID_full,gMS,paste0("nb_part_ID_out_co",c)) %>%
-#'                 rename(oMS=paste0("nb_part_ID_out_co",c))) %>%
-#'     left_join(data_id %>% select(ID_full, prop_self))
-#'   
-#'   
-#'   data_id_fem <- data_both_sexes %>%
-#'     # filter(ID_full %in% list_filt) %>%
-#'     filter(type=="fem") %>%
-#'     rename(oMS=!!sym(paste0("nb_part_ID_out_co",c))) %>%
-#'     left_join(data_id %>% select(ID_full, SR_fem_out,SR_self,seed_germ_sum,seed_semis_sum,poids_sd_mean,nb_frt,nb_flo,prop_self)) 
-#'   
-#'   return(list(data_proxy_ovav = data_proxy_ovav,
-#'               data_proxy_ov = data_proxy_ov,
-#'               data_proxy_av = data_proxy_av,
-#'               data_id_fem = data_id_fem))
-#' }
 #' 
 #' #' Get common theme for ggplot
 #' #'

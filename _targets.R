@@ -25,9 +25,15 @@ list(
   
   tar_target(data_flower,load_data_flower("data/data_ABPOLL_flower_resume.txt")),
   
+  tar_target(oms_gms_id_flower,get_oms_gms_id_flower(file_path_obs = "data/data_ABPOLL_ID_level_detflo.txt", file_path_gen = "data/fix10_paternities_ABPOLL.txt")),
+  
+  tar_target(data_proxy_id, get_data_proxy_id(data_flower)),
+  
+  tar_target(data_final,get_data_final(oms_gms_id_flower$oms_gms_flower, oms_gms_id_flower$oms_gms_id, data_flower, data_proxy_id)),
+
   # tar_target(data_id,load_data_id("data/data_ABPOLL_ID_resume.txt")),
   
-  tar_target(data_both_sexes,load_data_both_sexes("data/all_data_long_NA_0AllFemFALSE_raw.txt")),
+  # tar_target(data_both_sexes,load_data_both_sexes("data/all_data_long_NA_0AllFemFALSE_raw.txt")),
   
   # tar_target(data_proxies,get_data_proxies(data_flower, data_both_sexes, data_id, c = "10")),
   # 
