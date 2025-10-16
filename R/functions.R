@@ -14,6 +14,7 @@
 load_data_flower <- function(file_path){
   
   data_flower <- read.table(file_path,head=T) |>
+    filter(frt == 1) |> # we only keep the fruit for rs proxies
     mutate(ttt=as.factor(case_when(poll_treat==1~"low",
                                                  poll_treat==2~"medium",
                                                  TRUE~"high"))) |>
@@ -88,6 +89,28 @@ q_index <- function(x) {
 
 get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_detflo.txt", file_path_gen = "data/fix10_paternities_ABPOLL.txt"){
   
+  only_self <- read.table(file_path_obs,head=T) |>
+    filter(!session %in% c("5.FA1","5.MO1"))  |>
+  group_by(ID_full_part, id_flow_part) |>
+  summarise(
+    # nb individual with export
+    n_nonzero = sum(export_nb_visit_co10 != 0),
+    # si la seule ligne non nulle correspond à un "self"
+    self_only = ifelse(
+      n_nonzero == 1 &
+      all(ID_full_foc[export_nb_visit_co10 != 0] == ID_full_part[export_nb_visit_co10 != 0]),
+      1, 0
+    ),
+    .groups = "drop"
+  ) |>
+  select(ID_full_part, id_flow_part, self_only) |>
+    filter (self_only == 1) |>
+    mutate(oms = 0) |> 
+    rename(id = ID_full_part,
+           id_flow = id_flow_part) |>
+    select(-self_only)
+    
+  # regarder ça après manger, pb pas de cas où que selfing c'est étrange
   # couples with observed visits only (carry-over 10)
   obs_clean <- read.table(file_path_obs,head=T) |>
     filter(!session %in% c("5.FA1","5.MO1"))  |>
@@ -145,9 +168,7 @@ get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_det
   oms_gms_flower <- obs_clean |> 
     group_by(id,id_flow) |>
     summarise(oms = n_distinct(ID_full_foc))  |>
-    left_join(gen_clean |>
-                group_by(id, id_flow) |>
-                summarise(gms = n_distinct(candidate_id))) |>
+    bind_rows(only_self) |>
     left_join(q_obs_flower) |>
     left_join(q_gen_flower) |>
     mutate(ratio_q = q_gen / q_obs)
@@ -155,9 +176,6 @@ get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_det
   oms_gms_id <- obs_clean |> 
     group_by(id) |>
     summarise(oms = n_distinct(ID_full_foc))  |>
-    left_join(gen_clean |>
-                group_by(id) |>
-                summarise(gms = n_distinct(candidate_id))) |>
     left_join(q_obs_id) |>
     left_join(q_gen_id) |>
     mutate(ratio_q = q_gen / q_obs)
@@ -235,9 +253,10 @@ get_data_proxy_id <- function(data_flower){
 
 get_data_final <- function(oms_gms_flower, oms_gms_id, data_flower, data_proxy_id){
   
-  data_final_flower <- data_flower |>
+  data_final_flower <- data_flower |> # only receptive flowers
     select(id, id_flow, session, ttt, nb_ab, nb_ov, nb_seed, seed_weight, nb_sown, nb_germ, pl) |>
-    left_join(oms_gms_flower)
+    left_join(oms_gms_flower) |>
+    filter(!is.na(oms)) # filter spontaneous selfing or obs error
   
   data_final_id <- data_proxy_id |>
     left_join(oms_gms_id)
@@ -292,23 +311,172 @@ get_var_intra_inter <- function(data_final_flower){
 
 get_stat_flower <- function(data_final_flower){
   
+  # effect of oms on q ratio
+  model_q_oms_flower_0 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
+  model_q_oms_flower_1 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
+  model_q_oms_flower_2 <- lmer4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
+  model_q_oms_flower_3 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl + (1|session) + (1|session:id))
+  model_q_oms_flower_3b <- lme4::lmer(data = data_final_flower   |> filter (!is.na(pl)), ratio_q ~ oms + ttt + pl + (1|session) + (1|session:id))
+  model_q_oms_flower_4 <- lme4::lmer(data = data_final_flower, ratio_q ~ ttt + pl + (1|session) + (1|session:id))
+  model_q_oms_flower_5 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + pl + (1|session) + (1|session:id))
+  model_q_oms_flower_6 <- lme4::lmer(data = data_final_flower  |> filter (!is.na(pl)), ratio_q ~ oms + ttt + (1|session) + (1|session:id))
+  anova(model_q_oms_flower_0, model_q_oms_flower_1) # sign oms * ttt
+  anova(model_q_oms_flower_0, model_q_oms_flower_2) # ns pl * ttt
+  anova(model_q_oms_flower_3, model_q_oms_flower_4) # sign oms
+  anova(model_q_oms_flower_3, model_q_oms_flower_5) # marg sign ttt
+  anova(model_q_oms_flower_3b, model_q_oms_flower_6) # ns pl
   
-  model_oms_q_flower_0 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
-  model_oms_q_flower_1 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
-  model_oms_q_flower_2 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
-  model_oms_q_flower_3 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl + (1|session) + (1|session:id))
-  model_oms_q_flower_4 <- lme4::lmer(data = data_final_flower, ratio_q ~ ttt + pl + (1|session) + (1|session:id))
-  model_oms_q_flower_5 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + pl + (1|session) + (1|session:id))
-  model_oms_q_flower_6 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + (1|session) + (1|session:id))
-  anova(model_oms_q_flower_0, model_oms_q_flower_1) # sign oms * ttt
-  anova(model_oms_q_flower_0, model_oms_q_flower_2) # ns pl * ttt
-  anova(model_oms_q_flower_3, model_oms_q_flower_4) # sign oms
-  anova(model_oms_q_flower_3, model_oms_q_flower_5) # marg sign ttt
-  anova(model_oms_q_flower_3, model_oms_q_flower_6) # ns pl
-  anova(update(model_oms_q_flower, . ~ . - oms), update(model_oms_q_flower, . ~ . - oms:ttt))
+  data_final_flower <- data_final_flower |>
+    mutate(ttt=forcats::fct_relevel(ttt, "high"))
+  model_q_oms_flower_best <- lmerTest::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
+  summary(model_q_oms_flower_best)
   
-  model_oms_flower_ab <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "poisson")
+  # effect of oms on rs proxies
+  # aborted
+  model_ab_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_3b <- lme4::glmer(data = data_final_flower  |> filter (!is.na(pl)), cbind(nb_seed,nb_ab) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_oms_flower_6 <- lme4::glmer(data = data_final_flower  |> filter (!is.na(pl)), cbind(nb_seed,nb_ab) ~ oms + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_ab_oms_flower_0, model_ab_oms_flower_1) # ns oms * ttt
+  anova(model_ab_oms_flower_0, model_ab_oms_flower_2) # sign pl * ttt
+  anova(model_ab_oms_flower_3, model_ab_oms_flower_4) # ns oms
+  anova(model_ab_oms_flower_3, model_ab_oms_flower_5) # ns sign ttt
+  anova(model_ab_oms_flower_3b, model_ab_oms_flower_6) # ns pl
 
+  data_final_flower <- data_final_flower |>
+    mutate(ttt=forcats::fct_relevel(ttt, "high"))
+  model_ab_oms_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  summary(model_ab_oms_flower_best)
+  
+  # seed-set
+  model_ss_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_seed, nb_ov - nb_seed) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_oms_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_seed, nb_ov - nb_seed) ~ oms + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_ss_oms_flower_0, model_ss_oms_flower_1) # sign oms * ttt
+  anova(model_ss_oms_flower_0, model_ss_oms_flower_2) # sign pl * ttt
+  anova(model_ss_oms_flower_3, model_ss_oms_flower_4) # sign oms
+  anova(model_ss_oms_flower_3, model_ss_oms_flower_5) # ns ttt
+  anova(model_ss_oms_flower_3b, model_ss_oms_flower_6) # sign pl
+
+  data_final_flower <- data_final_flower |>
+    mutate(ttt=forcats::fct_relevel(ttt, "high"))
+  model_ss_oms_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  summary(model_ss_oms_flower_best)
+  
+  # germ
+  model_germ_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_oms_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_germ_oms_flower_0, model_germ_oms_flower_1) # ns oms * ttt
+  anova(model_germ_oms_flower_0, model_germ_oms_flower_2) # ns pl * ttt
+  anova(model_germ_oms_flower_3, model_germ_oms_flower_4) # ns oms
+  anova(model_germ_oms_flower_3, model_germ_oms_flower_5) # ns ttt
+  anova(model_germ_oms_flower_3b, model_germ_oms_flower_6) # ns pl
+
+  # weight
+  model_weight_oms_flower_0 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
+  model_weight_oms_flower_1 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
+  model_weight_oms_flower_2 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
+  model_weight_oms_flower_3 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms + ttt + pl + (1|session) + (1|session:id))
+  model_weight_oms_flower_3b <- lme4::lmer(data = data_final_flower |> filter (!is.na(pl)), seed_weight ~ oms + ttt + pl + (1|session) + (1|session:id))
+  model_weight_oms_flower_4 <- lme4::lmer(data = data_final_flower, seed_weight ~ ttt + pl + (1|session) + (1|session:id))
+  model_weight_oms_flower_5 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms + pl + (1|session) + (1|session:id))
+  model_weight_oms_flower_6 <- lme4::lmer(data = data_final_flower |> filter (!is.na(pl)), seed_weight ~ oms + ttt + (1|session) + (1|session:id))
+  anova(model_weight_oms_flower_0, model_weight_oms_flower_1) # ns oms * ttt
+  anova(model_weight_oms_flower_0, model_weight_oms_flower_2) # ns pl * ttt
+  anova(model_weight_oms_flower_3, model_weight_oms_flower_4) # ns oms
+  anova(model_weight_oms_flower_3, model_weight_oms_flower_5) # ns ttt
+  anova(model_weight_oms_flower_3b, model_weight_oms_flower_6) # ns pl
+  
+  # effect of ratio_q on rs proxies
+  # aborted
+  model_ab_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_3a <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_seed,nb_ab) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_seed,nb_ab) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_4 <- lme4::glmer(data = data_final_flower|> filter (!is.na(ratio_q)), cbind(nb_seed,nb_ab) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_5 <- lme4::glmer(data = data_final_flower , cbind(nb_seed,nb_ab) ~ ratio_q + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ab_q_flower_6 <- lme4::glmer(data = data_final_flower  |> filter (!is.na(pl)), cbind(nb_seed,nb_ab) ~ ratio_q + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_ab_q_flower_0, model_ab_q_flower_1) # ns ratio_q * ttt
+  anova(model_ab_q_flower_0, model_ab_q_flower_2) # ns pl * ttt
+  anova(model_ab_q_flower_3a, model_ab_q_flower_4) # ns ratio_q
+  anova(model_ab_q_flower_3, model_ab_q_flower_5) # ns sign ttt
+  anova(model_ab_q_flower_3b, model_ab_q_flower_6) # ns pl
+
+  # seed-set
+  model_ss_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_3a <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_4 <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_seed, nb_ov - nb_seed) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + pl + (1|session) + (1|session:id), family = "binomial")
+  model_ss_q_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_ss_q_flower_0, model_ss_q_flower_1) # ns ratio_q * ttt
+  anova(model_ss_q_flower_0, model_ss_q_flower_2) # marg sign pl * ttt
+  anova(model_ss_q_flower_3a, model_ss_q_flower_4) # ns ratio_q
+  anova(model_ss_q_flower_3, model_ss_q_flower_5) # ns ttt
+  anova(model_ss_q_flower_3b, model_ss_q_flower_6) # sign pl
+
+  data_final_flower <- data_final_flower |>
+    mutate(ttt=forcats::fct_relevel(ttt, "high"))
+  model_ss_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  summary(model_ss_q_flower_best)
+  
+  # germ
+  model_germ_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_3a <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_4 <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_germ, nb_sown - nb_germ) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + pl + (1|session) + (1|session:id), family = "binomial")
+  model_germ_q_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + (1|session) + (1|session:id), family = "binomial")
+  anova(model_germ_q_flower_0, model_germ_q_flower_1) # ns ratio_q * ttt
+  anova(model_germ_q_flower_0, model_germ_q_flower_2) # ns pl * ttt
+  anova(model_germ_q_flower_3a, model_germ_q_flower_4) # ns ratio_q
+  anova(model_germ_q_flower_3, model_germ_q_flower_5) # ns ttt
+  anova(model_germ_q_flower_3b, model_germ_q_flower_6) # ns pl
+
+  # weight
+  model_weight_q_flower_0 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id))
+  model_weight_q_flower_1 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id))
+  model_weight_q_flower_2 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id))
+  model_weight_q_flower_3 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q + ttt + pl + (1|session) + (1|session:id))
+  model_weight_q_flower_3a <- lme4::lmer(data = data_final_flower |> filter (!is.na(ratio_q)), seed_weight ~ ratio_q + ttt + pl + (1|session) + (1|session:id))
+  model_weight_q_flower_3b <- lme4::lmer(data = data_final_flower |> filter (!is.na(pl)), seed_weight ~ ratio_q + ttt + pl + (1|session) + (1|session:id))
+  model_weight_q_flower_4 <- lme4::lmer(data = data_final_flower |> filter (!is.na(ratio_q)), seed_weight ~ ttt + pl + (1|session) + (1|session:id))
+  model_weight_q_flower_5 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q + pl + (1|session) + (1|session:id))
+  model_weight_q_flower_6 <- lme4::lmer(data = data_final_flower |> filter (!is.na(pl)), seed_weight ~ ratio_q + ttt + (1|session) + (1|session:id))
+  anova(model_weight_q_flower_0, model_weight_q_flower_1) # ns ratio_q * ttt
+  anova(model_weight_q_flower_0, model_weight_q_flower_2) # sign pl * ttt
+  anova(model_weight_q_flower_3a, model_weight_q_flower_4) # ns ratio_q
+  anova(model_weight_q_flower_3, model_weight_q_flower_5) # ns ttt
+  anova(model_weight_q_flower_3b, model_weight_q_flower_6) # ns pl
+
+  data_final_flower <- data_final_flower |>
+    mutate(ttt=forcats::fct_relevel(ttt, "high"))
+  model_weight_q_flower_best <- lmerTest::lmer(data = data_final_flower, seed_weight ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id))  
+  summary(model_weight_q_flower_best)
+  
   return()
 }
 
