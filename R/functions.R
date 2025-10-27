@@ -89,7 +89,8 @@ q_index <- function(x) {
 
 get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_detflo.txt", file_path_gen = "data/fix10_paternities_ABPOLL.txt"){
   
-  only_self <- read.table(file_path_obs,head=T) |>
+  # flower that only received self pollen = true 0 MS
+  only_self_flower <- read.table(file_path_obs,head=T) |>
     filter(!session %in% c("5.FA1","5.MO1"))  |>
   group_by(ID_full_part, id_flow_part) |>
   summarise(
@@ -109,9 +110,29 @@ get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_det
     rename(id = ID_full_part,
            id_flow = id_flow_part) |>
     select(-self_only)
+  
+  # id that only received self pollen = true 0 MS
+  only_self_id <- read.table(file_path_obs,head=T) |>
+    filter(!session %in% c("5.FA1","5.MO1"))  |>
+    group_by(ID_full_part) |>
+    summarise(
+      # nb individual with export
+      n_nonzero = sum(export_nb_visit_co10 != 0),
+      # si la seule ligne non nulle correspond à un "self"
+      self_only = ifelse(
+        n_nonzero == 1 &
+          all(ID_full_foc[export_nb_visit_co10 != 0] == ID_full_part[export_nb_visit_co10 != 0]),
+        1, 0
+      ),
+      .groups = "drop"
+    ) |>
+    select(ID_full_part, self_only) |>
+    filter (self_only == 1) |>
+    mutate(oms = 0) |> 
+    rename(id = ID_full_part) |>
+    select(-self_only)
+  # not any id received only self pollen
     
-  # regarder ça après manger, pb pas de cas où que selfing c'est étrange
-  # couples with observed visits only (carry-over 10)
   obs_clean <- read.table(file_path_obs,head=T) |>
     filter(!session %in% c("5.FA1","5.MO1"))  |>
     select(session,ID_full_foc,ID_full_part,id_flow_part,export_nb_visit_co10) |>
@@ -167,15 +188,18 @@ get_oms_gms_id_flower <- function(file_path_obs = "data/data_ABPOLL_ID_level_det
   
   oms_gms_flower <- obs_clean |> 
     group_by(id,id_flow) |>
-    summarise(oms = n_distinct(ID_full_foc))  |>
-    bind_rows(only_self) |>
+    summarise(oms = n_distinct(ID_full_foc),
+              contact = mean(export_nb_visit_co10, na.rm = T))  |>
+    bind_rows(only_self_flower) |>
     left_join(q_obs_flower) |>
     left_join(q_gen_flower) |>
     mutate(ratio_q = q_gen / q_obs)
   
   oms_gms_id <- obs_clean |> 
     group_by(id) |>
-    summarise(oms = n_distinct(ID_full_foc))  |>
+    summarise(oms = n_distinct(ID_full_foc),
+              contact = mean(export_nb_visit_co10, na.rm = T))  |>
+    # bind_rows(only_self_id) |> # not any id
     left_join(q_obs_id) |>
     left_join(q_gen_id) |>
     mutate(ratio_q = q_gen / q_obs)
@@ -233,7 +257,7 @@ get_data_proxy_id <- function(data_flower){
     full_join(data_proxy_germ) |>
     full_join(data_proxy_weight) |>
     ungroup() |>
-    mutate_all(~ifelse(is.nan(.), NA, .)) |> # for id without seed weight
+    mutate(across(4:10, ~ ifelse(is.nan(.), NA, .))) |> # for id without seed weight
     filter(if_any(4:10, ~ !is.na(.)))  # remove id without data
     
   return(data_proxy_id)
@@ -259,7 +283,8 @@ get_data_final <- function(oms_gms_flower, oms_gms_id, data_flower, data_proxy_i
     filter(!is.na(oms)) # filter spontaneous selfing or obs error
   
   data_final_id <- data_proxy_id |>
-    left_join(oms_gms_id)
+    left_join(oms_gms_id) |>
+    filter(!is.na(oms)) # filter spontaneous selfing or obs error
   
   return(list(data_final_flower = data_final_flower,
               data_final_id = data_final_id))
@@ -297,7 +322,7 @@ get_var_intra_inter <- function(data_final_flower){
   return(icc_id)
 }
 
-#' Statistic models
+#' Statistic models: flower scale
 #'
 #' @description
 #'
@@ -311,7 +336,7 @@ get_var_intra_inter <- function(data_final_flower){
 
 get_stat_flower <- function(data_final_flower){
   
-  # effect of oms on q ratio
+  # effect of oms on q ratio ----
   model_q_oms_flower_0 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
   model_q_oms_flower_1 <- lme4::lmer(data = data_final_flower, ratio_q ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
   model_q_oms_flower_2 <- lmer4::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
@@ -331,8 +356,8 @@ get_stat_flower <- function(data_final_flower){
   model_q_oms_flower_best <- lmerTest::lmer(data = data_final_flower, ratio_q ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
   summary(model_q_oms_flower_best)
   
-  # effect of oms on rs proxies
-  # aborted
+  # effect of oms on rs proxies ----
+  ## aborted ----
   model_ab_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ab_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ab_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -352,7 +377,7 @@ get_stat_flower <- function(data_final_flower){
   model_ab_oms_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   summary(model_ab_oms_flower_best)
   
-  # seed-set
+  ## seed-set ----
   model_ss_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ss_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ss_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -372,7 +397,7 @@ get_stat_flower <- function(data_final_flower){
   model_ss_oms_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   summary(model_ss_oms_flower_best)
   
-  # germ
+  ## germ ----
   model_germ_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_germ_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_germ_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -387,7 +412,7 @@ get_stat_flower <- function(data_final_flower){
   anova(model_germ_oms_flower_3, model_germ_oms_flower_5) # ns ttt
   anova(model_germ_oms_flower_3b, model_germ_oms_flower_6) # ns pl
 
-  # weight
+  ## weight ----
   model_weight_oms_flower_0 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms * ttt + pl * ttt + (1|session) + (1|session:id))
   model_weight_oms_flower_1 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms + ttt + pl * ttt + (1|session) + (1|session:id))
   model_weight_oms_flower_2 <- lme4::lmer(data = data_final_flower, seed_weight ~ oms * ttt + pl + ttt + (1|session) + (1|session:id))
@@ -402,8 +427,8 @@ get_stat_flower <- function(data_final_flower){
   anova(model_weight_oms_flower_3, model_weight_oms_flower_5) # ns ttt
   anova(model_weight_oms_flower_3b, model_weight_oms_flower_6) # ns pl
   
-  # effect of ratio_q on rs proxies
-  # aborted
+  # effect of ratio_q on rs proxies ----
+  ## aborted ----
   model_ab_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ab_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ab_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed,nb_ab) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -419,7 +444,7 @@ get_stat_flower <- function(data_final_flower){
   anova(model_ab_q_flower_3, model_ab_q_flower_5) # ns sign ttt
   anova(model_ab_q_flower_3b, model_ab_q_flower_6) # ns pl
 
-  # seed-set
+  ## seed-set ----
   model_ss_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ss_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_ss_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -440,7 +465,7 @@ get_stat_flower <- function(data_final_flower){
   model_ss_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_seed, nb_ov - nb_seed) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   summary(model_ss_q_flower_best)
   
-  # germ
+  ## germ ----
   model_germ_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_germ_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
   model_germ_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
@@ -456,7 +481,7 @@ get_stat_flower <- function(data_final_flower){
   anova(model_germ_q_flower_3, model_germ_q_flower_5) # ns ttt
   anova(model_germ_q_flower_3b, model_germ_q_flower_6) # ns pl
 
-  # weight
+  ## weight ----
   model_weight_q_flower_0 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id))
   model_weight_q_flower_1 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id))
   model_weight_q_flower_2 <- lme4::lmer(data = data_final_flower, seed_weight ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id))
@@ -478,6 +503,876 @@ get_stat_flower <- function(data_final_flower){
   summary(model_weight_q_flower_best)
   
   return()
+}
+
+#' Statistic models: id scale
+#'
+#' @description
+#'
+#' @param
+#'
+#' @return
+#'
+#' @import dplyr
+#'
+#' @export
+
+get_stat_id <- function(data_final_id, include_contact = FALSE){
+
+  
+  if(include_contact){
+    
+    method_name <- "w_contact"
+    
+    # with contact ----
+    ## effect of oms on q ratio ----
+    model_q_oms_id_0 <- lme4::lmer(data = data_final_id, ratio_q ~ oms * ttt + contact * ttt + (1|session))
+    model_q_oms_id_1 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + ttt + contact * ttt + (1|session))
+    model_q_oms_id_2 <- lme4::lmer(data = data_final_id, ratio_q ~ oms * ttt + contact + ttt + (1|session))
+    model_q_oms_id_3 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + ttt + contact + (1|session))
+    model_q_oms_id_4 <- lme4::lmer(data = data_final_id, ratio_q ~ ttt + contact + (1|session))
+    model_q_oms_id_5 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + contact + (1|session))
+    model_q_oms_id_6 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + ttt + (1|session))
+    lrt_interoms_q_oms <- anova(model_q_oms_id_0, model_q_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_q_oms <- anova(model_q_oms_id_0, model_q_oms_id_1) |> as.data.frame() # contact * ttt
+    lrt_oms_q_oms <- anova(model_q_oms_id_3, model_q_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_q_oms <-anova(model_q_oms_id_3, model_q_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_q_oms <-anova(model_q_oms_id_3, model_q_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_q_oms <- lrt_interoms_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>      mutate(method = method_name,
+             proxy = "q",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + contact * ttt + (1|session))
+    estimate_low_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + contact * ttt + (1|session))
+    estimate_medium_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + contact * ttt + (1|session))
+    estimate_high_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_q_oms <- estimate_low_q_oms |>
+      bind_rows(estimate_medium_q_oms) |>
+      bind_rows(estimate_high_q_oms) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ## effect of oms on rs proxies ----
+    ### aborted ----
+    model_ab_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    model_ab_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + ttt + contact * ttt + (1|session), family = "binomial")
+    model_ab_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + contact + ttt + (1|session), family = "binomial")
+    model_ab_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + ttt + contact + (1|session), family = "binomial")
+    model_ab_oms_id_4 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ttt + contact + (1|session), family = "binomial")
+    model_ab_oms_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + contact + (1|session), family = "binomial")
+    model_ab_oms_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + ttt + (1|session), family = "binomial")
+    lrt_interoms_ab_oms <- anova(model_ab_oms_id_0, model_ab_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_ab_oms <- anova(model_ab_oms_id_0, model_ab_oms_id_1) |> as.data.frame() # contact * ttt
+    lrt_oms_ab_oms <- anova(model_ab_oms_id_3, model_ab_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_ab_oms <-anova(model_ab_oms_id_3, model_ab_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_ab_oms <-anova(model_ab_oms_id_3, model_ab_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_ab_oms <- lrt_interoms_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>      
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ab_oms_id_best <-  lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ab_oms_id_best <-  lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ab_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ab_oms <- estimate_low_ab_oms |>
+      bind_rows(estimate_medium_ab_oms) |>
+      bind_rows(estimate_high_ab_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### seed-set ----
+    model_ss_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    model_ss_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + ttt + contact * ttt + (1|session), family = "binomial")
+    model_ss_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + contact + ttt + (1|session), family = "binomial")
+    model_ss_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + ttt + contact + (1|session), family = "binomial")
+    model_ss_oms_id_4 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ttt + contact + (1|session), family = "binomial")
+    model_ss_oms_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + contact + (1|session), family = "binomial")
+    model_ss_oms_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + ttt + (1|session), family = "binomial")
+    lrt_interoms_ss_oms <- anova(model_ss_oms_id_0, model_ss_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_ss_oms <- anova(model_ss_oms_id_0, model_ss_oms_id_1) |> as.data.frame() # contact * ttt
+    lrt_oms_ss_oms <- anova(model_ss_oms_id_3, model_ss_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_ss_oms <-anova(model_ss_oms_id_3, model_ss_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_ss_oms <-anova(model_ss_oms_id_3, model_ss_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_ss_oms <- lrt_interoms_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ss_oms <- estimate_low_ss_oms |>
+      bind_rows(estimate_medium_ss_oms) |>
+      bind_rows(estimate_high_ss_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### germ ----
+    model_germ_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    model_germ_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + ttt + contact * ttt + (1|session), family = "binomial")
+    model_germ_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact + ttt + (1|session), family = "binomial")
+    model_germ_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + ttt + contact + (1|session), family = "binomial")
+    model_germ_oms_id_4 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ttt + contact + (1|session), family = "binomial")
+    model_germ_oms_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + contact + (1|session), family = "binomial")
+    model_germ_oms_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + ttt + (1|session), family = "binomial")
+    lrt_interoms_germ_oms <- anova(model_germ_oms_id_0, model_germ_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_germ_oms <- anova(model_germ_oms_id_0, model_germ_oms_id_1) |> as.data.frame() # contact * ttt
+    lrt_oms_germ_oms <- anova(model_germ_oms_id_3, model_germ_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_germ_oms <-anova(model_germ_oms_id_3, model_germ_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_germ_oms <-anova(model_germ_oms_id_3, model_germ_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_germ_oms <- lrt_interoms_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |> 
+      mutate(method = method_name,proxy = "germ",
+             response = "oms",
+             .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_germ_oms_id_best <-lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_germ_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_germ_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_germ_oms <- estimate_low_germ_oms |>
+      bind_rows(estimate_medium_germ_oms) |>
+      bind_rows(estimate_high_germ_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### weight ----
+    model_weight_oms_id_0 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + contact * ttt + (1|session))
+    model_weight_oms_id_1 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + ttt + contact * ttt + (1|session))
+    model_weight_oms_id_2 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + contact + ttt + (1|session))
+    model_weight_oms_id_3 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + ttt + contact + (1|session))
+    model_weight_oms_id_4 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ttt + contact + (1|session))
+    model_weight_oms_id_5 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + contact + (1|session))
+    model_weight_oms_id_6 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + ttt + (1|session))
+    lrt_interoms_weight_oms <- anova(model_weight_oms_id_0, model_weight_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_weight_oms <- anova(model_weight_oms_id_0, model_weight_oms_id_1) |> as.data.frame() # contact * ttt
+    lrt_oms_weight_oms <- anova(model_weight_oms_id_3, model_weight_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_weight_oms <-anova(model_weight_oms_id_3, model_weight_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_weight_oms <-anova(model_weight_oms_id_3, model_weight_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_weight_oms <- lrt_interoms_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,proxy = "weight",
+             response = "oms", 
+             .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_weight_oms_id_best <-lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + contact * ttt + (1|session))
+    estimate_low_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_weight_oms_id_best <- lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + contact * ttt + (1|session))
+    estimate_medium_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_weight_oms_id_best <- lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + contact * ttt + (1|session))
+    estimate_high_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_weight_oms <- estimate_low_weight_oms |>
+      bind_rows(estimate_medium_weight_oms) |>
+      bind_rows(estimate_high_weight_oms) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ## effect of ratio_q on rs proxies ----
+    ### aborted ----
+    model_ab_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    model_ab_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + contact * ttt + (1|session), family = "binomial")
+    model_ab_q_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + contact + ttt + (1|session), family = "binomial")
+    model_ab_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_ab_q_id_3a <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_ab_q_id_4 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ttt + contact + (1|session), family = "binomial")
+    model_ab_q_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + contact + (1|session), family = "binomial")
+    model_ab_q_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + (1|session), family = "binomial")
+    lrt_interq_ab_q <- anova(model_ab_q_id_0, model_ab_q_id_1) |> as.data.frame() # ratio_q * ttt
+    lrt_intercontact_ab_q <- anova(model_ab_q_id_0, model_ab_q_id_1) |> as.data.frame() # contact * ttt
+    lrt_q_ab_q <- anova(model_ab_q_id_3a, model_ab_q_id_4) |> as.data.frame() # ratio_q
+    lrt_ttt_ab_q <-anova(model_ab_q_id_3, model_ab_q_id_5) |> as.data.frame() # ttt
+    lrt_contact_ab_q <-anova(model_ab_q_id_3, model_ab_q_id_6) |> as.data.frame() # contact
+    
+    lrt_ab_q <- lrt_interq_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_intercontact_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>      
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ab_q <- estimate_low_ab_q |>
+      bind_rows(estimate_medium_ab_q) |>
+      bind_rows(estimate_high_ab_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### seed-set ----
+    model_ss_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    model_ss_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + contact * ttt + (1|session), family = "binomial")
+    model_ss_q_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + contact + ttt + (1|session), family = "binomial")
+    model_ss_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_ss_q_id_3a <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_ss_q_id_4 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ttt + contact + (1|session), family = "binomial")
+    model_ss_q_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + contact + (1|session), family = "binomial")
+    model_ss_q_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + (1|session), family = "binomial")
+    lrt_interq_ss_q <- anova(model_ss_q_id_0, model_ss_q_id_1) |> as.data.frame() # ratio_q * ttt
+    lrt_intercontact_ss_q <- anova(model_ss_q_id_0, model_ss_q_id_1) |> as.data.frame() # contact * ttt
+    lrt_q_ss_q <- anova(model_ss_q_id_3a, model_ss_q_id_4) |> as.data.frame() # ratio_q
+    lrt_ttt_ss_q <-anova(model_ss_q_id_3, model_ss_q_id_5) |> as.data.frame() # ttt
+    lrt_contact_ss_q <-anova(model_ss_q_id_3, model_ss_q_id_6) |> as.data.frame() # contact
+    
+    lrt_ss_q <- lrt_interq_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_intercontact_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ss_q <- estimate_low_ss_q |>
+      bind_rows(estimate_medium_ss_q) |>
+      bind_rows(estimate_high_ss_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### germ ----
+    model_germ_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    model_germ_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + contact * ttt + (1|session), family = "binomial")
+    model_germ_q_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact + ttt + (1|session), family = "binomial")
+    model_germ_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_germ_q_id_3a <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_germ_q_id_4 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ttt + contact + (1|session), family = "binomial")
+    model_germ_q_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + contact + (1|session), family = "binomial")
+    model_germ_q_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + (1|session), family = "binomial")
+    lrt_interq_germ_q <- anova(model_germ_q_id_0, model_germ_q_id_1) |> as.data.frame() # ratio_q * ttt
+    lrt_intercontact_germ_q <- anova(model_germ_q_id_0, model_germ_q_id_1) |> as.data.frame() # contact * ttt
+    lrt_q_germ_q <- anova(model_germ_q_id_3a, model_germ_q_id_4) |> as.data.frame() # ratio_q
+    lrt_ttt_germ_q <-anova(model_germ_q_id_3, model_germ_q_id_5) |> as.data.frame() # ttt
+    lrt_contact_germ_q <-anova(model_germ_q_id_3, model_germ_q_id_6) |> as.data.frame() # contact
+    
+    lrt_germ_q <- lrt_interq_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_intercontact_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |> 
+      mutate(method = method_name,proxy = "germ",
+             response = "ratio_q",
+             .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_germ_q_id_best <-lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_germ_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_germ_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_germ_q <- estimate_low_germ_q |>
+      bind_rows(estimate_medium_germ_q) |>
+      bind_rows(estimate_high_germ_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    ### weight ----
+    model_weight_q_id_0 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + contact * ttt + (1|session))
+    model_weight_q_id_1 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + ttt + contact * ttt + (1|session))
+    model_weight_q_id_2 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + contact + ttt + (1|session))
+    model_weight_q_id_3 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + ttt + contact + (1|session))
+    model_weight_q_id_3a <- lme4::lmer(data = data_final_id |> filter(!(is.na(ratio_q))), mean_seed_weight ~ ratio_q + ttt + contact + (1|session))
+    model_weight_q_id_4 <- lme4::lmer(data = data_final_id |> filter(!(is.na(ratio_q))), mean_seed_weight ~ ttt + contact + (1|session))
+    model_weight_q_id_5 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + contact + (1|session))
+    model_weight_q_id_6 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + ttt + (1|session))
+    lrt_interq_weight_q <- anova(model_weight_q_id_0, model_weight_q_id_1) |> as.data.frame() # ratio_q * ttt
+    lrt_intercontact_weight_q <- anova(model_weight_q_id_0, model_weight_q_id_1) |> as.data.frame() # contact * ttt
+    lrt_q_weight_q <- anova(model_weight_q_id_3a, model_weight_q_id_4) |> as.data.frame() # ratio_q
+    lrt_ttt_weight_q <-anova(model_weight_q_id_3, model_weight_q_id_5) |> as.data.frame() # ttt
+    lrt_contact_weight_q <-anova(model_weight_q_id_3, model_weight_q_id_6) |> as.data.frame() # contact
+    
+    lrt_weight_q <- lrt_interq_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_intercontact_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,proxy = "weight",
+             response = "ratio_q", 
+             .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_weight_q_id_best <-lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + contact * ttt + (1|session))
+    estimate_low_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_weight_q_id_best <- lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + contact * ttt + (1|session))
+    estimate_medium_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_weight_q_id_best <- lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + contact * ttt + (1|session))
+    estimate_high_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_weight_q <- estimate_low_weight_q |>
+      bind_rows(estimate_medium_weight_q) |>
+      bind_rows(estimate_high_weight_q) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "q", .before = 1)
+    
+    lrt_table <- lrt_q_oms |>
+      bind_rows(lrt_ab_oms) |>
+      bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_germ_oms) |>
+      bind_rows(lrt_weight_oms) |>
+      bind_rows(lrt_ab_q) |>
+      bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_germ_q) |>
+      bind_rows(lrt_weight_q) |>
+      rename(chisq = Chisq,
+             df = Df,
+             pvalue = "Pr(>Chisq)") |>
+      mutate(level = "id", .before = 1)
+    
+    estimate_table <- estimate_q_oms |>
+      bind_rows(estimate_ab_oms) |>
+      bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_germ_oms) |>
+      bind_rows(estimate_weight_oms) |>
+      bind_rows(estimate_ab_q) |>
+      bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_germ_q) |>
+      bind_rows(estimate_weight_q) |>
+      select(-c("t value","z value")) |>
+      rename(estimate = Estimate,
+             se = "Std. Error") |>
+      mutate(level = "id", .before = 1)
+    
+    
+  }else{
+    
+    method_name <- "wo_contact"
+    
+    # without contact ----
+    ## effect of oms on q ratio ----
+    model_q_oms_id_0 <- lme4::lmer(data = data_final_id, ratio_q ~ oms * ttt + (1|session))
+    model_q_oms_id_1 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + ttt + (1|session))
+    model_q_oms_id_2 <- lme4::lmer(data = data_final_id, ratio_q ~ ttt + (1|session))
+    model_q_oms_id_3 <- lme4::lmer(data = data_final_id, ratio_q ~ oms + (1|session))
+    lrt_interoms_q_oms <- anova(model_q_oms_id_0, model_q_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_q_oms <- anova(model_q_oms_id_1, model_q_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_q_oms <-anova(model_q_oms_id_1, model_q_oms_id_3) |> as.data.frame() # ns ttt
+      
+    lrt_q_oms <- lrt_interoms_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_q_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "q",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + (1|session))
+    estimate_low_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + (1|session))
+    estimate_medium_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_q_oms_id_best <- lmerTest::lmer(data = data_final_id, ratio_q ~ oms * ttt + (1|session))
+    estimate_high_q_oms <- summary(model_q_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_q_oms <- estimate_low_q_oms |>
+      bind_rows(estimate_medium_q_oms) |>
+      bind_rows(estimate_high_q_oms) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "q",
+             response = "oms", .before = 1)
+    
+    ## effect of oms on rs proxies ----
+    ### aborted ----
+    model_ab_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + (1|session), family = "binomial")
+    model_ab_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + ttt + (1|session), family = "binomial")
+    model_ab_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ttt + (1|session), family = "binomial")
+    model_ab_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms + (1|session), family = "binomial")
+    lrt_interoms_ab_oms <- anova(model_ab_oms_id_0, model_ab_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_ab_oms <- anova(model_ab_oms_id_1, model_ab_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_ab_oms <-anova(model_ab_oms_id_1, model_ab_oms_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_ab_oms <- lrt_interoms_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_ab_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ab_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_low_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ab_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_medium_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ab_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_high_ab_oms <- summary(model_ab_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ab_oms <- estimate_low_ab_oms |>
+      bind_rows(estimate_medium_ab_oms) |>
+      bind_rows(estimate_high_ab_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "oms", .before = 1)
+    
+    ### seed-set ----
+    model_ss_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + (1|session), family = "binomial")
+    model_ss_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + ttt + (1|session), family = "binomial")
+    model_ss_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ttt + (1|session), family = "binomial")
+    model_ss_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms + (1|session), family = "binomial")
+    lrt_interoms_ss_oms <- anova(model_ss_oms_id_0, model_ss_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_ss_oms <- anova(model_ss_oms_id_1, model_ss_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_ss_oms <-anova(model_ss_oms_id_1, model_ss_oms_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_ss_oms <- lrt_interoms_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_ss_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_low_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_medium_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ss_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_high_ss_oms <- summary(model_ss_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ss_oms <- estimate_low_ss_oms |>
+      bind_rows(estimate_medium_ss_oms) |>
+      bind_rows(estimate_high_ss_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "oms", .before = 1)
+    
+    ### germ ----
+    model_germ_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + (1|session), family = "binomial")
+    model_germ_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + ttt + (1|session), family = "binomial")
+    model_germ_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ttt + (1|session), family = "binomial")
+    model_germ_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms + (1|session), family = "binomial")
+    lrt_interoms_germ_oms <- anova(model_germ_oms_id_0, model_germ_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_germ_oms <- anova(model_germ_oms_id_1, model_germ_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_germ_oms <-anova(model_germ_oms_id_1, model_germ_oms_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_germ_oms <- lrt_interoms_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_germ_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "germ",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_germ_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_low_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_germ_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_medium_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_germ_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_high_germ_oms <- summary(model_germ_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_germ_oms <- estimate_low_germ_oms |>
+      bind_rows(estimate_medium_germ_oms) |>
+      bind_rows(estimate_high_germ_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "germ",
+             response = "oms", .before = 1)
+    
+    ### weight ----
+    model_weight_oms_id_0 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + (1|session))
+    model_weight_oms_id_1 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + ttt + (1|session))
+    model_weight_oms_id_2 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ttt + (1|session))
+    model_weight_oms_id_3 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ oms + (1|session))
+    lrt_interoms_weight_oms <- anova(model_weight_oms_id_0, model_weight_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_weight_oms <- anova(model_weight_oms_id_1, model_weight_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_weight_oms <-anova(model_weight_oms_id_1, model_weight_oms_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_weight_oms <- lrt_interoms_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_weight_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "weight",
+             response = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_weight_oms_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + (1|session))
+    estimate_low_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_weight_oms_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + (1|session))
+    estimate_medium_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_weight_oms_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ oms * ttt + (1|session))
+    estimate_high_weight_oms <- summary(model_weight_oms_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_weight_oms <- estimate_low_weight_oms |>
+      bind_rows(estimate_medium_weight_oms) |>
+      bind_rows(estimate_high_weight_oms) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "weight",
+             response = "oms", .before = 1)
+    
+    ## effect of ratio_q on rs proxies ----
+    ### aborted ----
+    model_ab_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + (1|session), family = "binomial")
+    model_ab_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_ab_q_id_1b <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)) , cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_ab_q_id_2 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)) , cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ttt + (1|session), family = "binomial")
+    model_ab_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q + (1|session), family = "binomial")
+    lrt_interq_ab_q <- anova(model_ab_q_id_0, model_ab_q_id_1) |> as.data.frame() # ns ratio_q * ttt
+    lrt_q_ab_q <- anova(model_ab_q_id_1b, model_ab_q_id_2) |> as.data.frame() # marg sin ratio_q
+    lrt_ttt_ab_q <-anova(model_ab_q_id_1, model_ab_q_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_ab_q <- lrt_interq_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_q_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_ab_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_low_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_medium_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ab_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ab,nb_ab_sum_ab) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_high_ab_q <- summary(model_ab_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ab_q <- estimate_low_ab_q |>
+      bind_rows(estimate_medium_ab_q) |>
+      bind_rows(estimate_high_ab_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "ab",
+             response = "ratio_q", .before = 1)
+    
+    ### seed-set ----
+    model_ss_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + (1|session), family = "binomial")
+    model_ss_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_ss_q_id_1b <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_ss_q_id_2 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ttt + (1|session), family = "binomial")
+    model_ss_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q + (1|session), family = "binomial")
+    lrt_interq_ss_q <- anova(model_ss_q_id_0, model_ss_q_id_1) |> as.data.frame() # ns ratio_q * ttt
+    lrt_q_ss_q <- anova(model_ss_q_id_1b, model_ss_q_id_2) |> as.data.frame() # marg sin ratio_q
+    lrt_ttt_ss_q <-anova(model_ss_q_id_1, model_ss_q_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_ss_q <- lrt_interq_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_q_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_ss_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_low_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_medium_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_ss_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_seed_sum_ss, nb_ov_sum_ss - nb_seed_sum_ss) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_high_ss_q <- summary(model_ss_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_ss_q <- estimate_low_ss_q |>
+      bind_rows(estimate_medium_ss_q) |>
+      bind_rows(estimate_high_ss_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "ss",
+             response = "ratio_q", .before = 1)
+    
+    ### germ ----
+    model_germ_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + (1|session), family = "binomial")
+    model_germ_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_germ_q_id_1b <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_germ_q_id_2 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ttt + (1|session), family = "binomial")
+    model_germ_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + (1|session), family = "binomial")
+    lrt_interq_germ_q <- anova(model_germ_q_id_0, model_germ_q_id_1) |> as.data.frame() # ns ratio_q * ttt
+    lrt_q_germ_q <- anova(model_germ_q_id_1b, model_germ_q_id_2) |> as.data.frame() # marg sin ratio_q
+    lrt_ttt_germ_q <-anova(model_germ_q_id_1, model_germ_q_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_germ_q <- lrt_interq_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_q_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_germ_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "germ",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_germ_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_low_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_germ_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_medium_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_germ_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_high_germ_q <- summary(model_germ_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_germ_q <- estimate_low_germ_q |>
+      bind_rows(estimate_medium_germ_q) |>
+      bind_rows(estimate_high_germ_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             proxy = "germ",
+             response = "ratio_q", .before = 1)
+    
+    ### weight ----
+    model_weight_q_id_0 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + (1|session))
+    model_weight_q_id_1 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + ttt + (1|session))
+    model_weight_q_id_1b <- lme4::lmer(data = data_final_id |> filter(!is.na(ratio_q)), mean_seed_weight ~ ratio_q + ttt + (1|session))
+    model_weight_q_id_2 <- lme4::lmer(data = data_final_id |> filter(!is.na(ratio_q)), mean_seed_weight ~ ttt + (1|session))
+    model_weight_q_id_3 <- lme4::lmer(data = data_final_id, mean_seed_weight ~ ratio_q + (1|session))
+    lrt_interq_weight_q <- anova(model_weight_q_id_0, model_weight_q_id_1) |> as.data.frame() # ns ratio_q * ttt
+    lrt_q_weight_q <- anova(model_weight_q_id_1b, model_weight_q_id_2) |> as.data.frame() # marg sin ratio_q
+    lrt_ttt_weight_q <-anova(model_weight_q_id_1, model_weight_q_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_weight_q <- lrt_interq_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_q_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_weight_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "weight",
+             response = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_weight_q_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + (1|session))
+    estimate_low_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_weight_q_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + (1|session))
+    estimate_medium_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_weight_q_id_best <-  lmerTest::lmer(data = data_final_id, mean_seed_weight ~ ratio_q * ttt + (1|session))
+    estimate_high_weight_q <- summary(model_weight_q_id_best)$coefficients |> as.data.frame() |> rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_weight_q <- estimate_low_weight_q |>
+      bind_rows(estimate_medium_weight_q) |>
+      bind_rows(estimate_high_weight_q) |>
+      rename(pvalue = "Pr(>|t|)") |> 
+      mutate(method = method_name,
+             proxy = "weight",
+             response = "ratio_q", .before = 1)
+    
+    lrt_table <- lrt_q_oms |>
+      bind_rows(lrt_ab_oms) |>
+      bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_germ_oms) |>
+      bind_rows(lrt_weight_oms) |>
+      bind_rows(lrt_ab_q) |>
+      bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_germ_q) |>
+      bind_rows(lrt_weight_q) |>
+      rename(chisq = Chisq,
+             df = Df,
+             pvalue = "Pr(>Chisq)")
+    
+    estimate_table <- estimate_q_oms |>
+      bind_rows(estimate_ab_oms) |>
+      bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_germ_oms) |>
+      bind_rows(estimate_weight_oms) |>
+      bind_rows(estimate_ab_q) |>
+      bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_germ_q) |>
+      bind_rows(estimate_weight_q) |>
+      select(-c("t value","z value")) |>
+      rename(estimate = Estimate,
+             se = "Std. Error")
+    
+  }
+  return(list(lrt_table = lrt_table,
+              estimate_table = estimate_table))
 }
 
 #' #' Read data at the individual level
