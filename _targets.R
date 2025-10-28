@@ -30,6 +30,14 @@ list(
   tar_target(data_proxy_id, get_data_proxy_id(data_flower)),
   
   tar_target(data_final,get_data_final(oms_gms_id_flower$oms_gms_flower, oms_gms_id_flower$oms_gms_id, data_flower, data_proxy_id)),
+  
+  tar_target(stat_flower_wo_contact,get_stat_flower(data_final$data_final_flower, include_contact = FALSE)),
+  
+  tar_target(stat_flower_w_contact,get_stat_flower(data_final$data_final_flower, include_contact = TRUE)),
+  
+  tar_target(stat_id_wo_contact,get_stat_id(data_final$data_final_id, include_contact = FALSE)),
+  
+  tar_target(stat_id_w_contact,get_stat_id(data_final$data_final_id, include_contact = TRUE)),
 
   # tar_target(data_id,load_data_id("data/data_ABPOLL_ID_resume.txt")),
   
