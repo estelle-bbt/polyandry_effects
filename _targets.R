@@ -23,7 +23,9 @@ list(
   
   ## Manage data ----
   
-  tar_target(data_flower,load_data_flower("data/data_ABPOLL_flower_resume.txt")),
+  tar_target(file_flower,"data/data_ABPOLL_flower_resume.txt",format = "file"), # to reevaluate the next target if the file is modified
+  
+  tar_target(data_flower,load_data_flower(file_flower)),
   
   tar_target(oms_gms_id_flower,get_oms_gms_id_flower(file_path_obs = "data/data_ABPOLL_ID_level_detflo.txt", file_path_gen = "data/fix10_paternities_ABPOLL.txt")),
   
@@ -32,12 +34,14 @@ list(
   tar_target(data_final,get_data_final(oms_gms_id_flower$oms_gms_flower, oms_gms_id_flower$oms_gms_id, data_flower, data_proxy_id)),
   
   tar_target(stat_flower_wo_contact,get_stat_flower(data_final$data_final_flower, include_contact = FALSE)),
-  
+
   tar_target(stat_flower_w_contact,get_stat_flower(data_final$data_final_flower, include_contact = TRUE)),
   
   tar_target(stat_id_wo_contact,get_stat_id(data_final$data_final_id, include_contact = FALSE)),
   
   tar_target(stat_id_w_contact,get_stat_id(data_final$data_final_id, include_contact = TRUE)),
+  
+  tar_target(results_plot,get_results_plot(stat_flower_wo_contact,stat_flower_w_contact,stat_id_wo_contact,stat_id_w_contact)),
 
   # tar_target(data_id,load_data_id("data/data_ABPOLL_ID_resume.txt")),
   

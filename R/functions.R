@@ -25,7 +25,9 @@ load_data_flower <- function(file_path){
            nb_seed = nbGr_SR,
            seed_weight = poids_sd,
            nb_germ = nbGr_germ,
-           nb_sown = nbGr_semis)
+           nb_sown = nbGr_semis) |>
+    mutate(nb_fert = nb_ab + nb_seed,
+           truc = "bla")
   
   return(data_flower)
 }
@@ -240,6 +242,13 @@ get_data_proxy_id <- function(data_flower){
     summarise(nb_ov_sum_ss=sum(nb_ov,na.rm=T),
               nb_seed_sum_ss=sum(nb_seed,na.rm=T))
   
+  # proportion fertilized
+  data_proxy_fert <- data_flower %>%
+    filter(!(is.na(nb_ov)|is.na(nb_fert))) %>%
+    group_by(id,session,ttt) %>%
+    summarise(nb_ov_sum_fert=sum(nb_ov,na.rm=T),
+              nb_fert_sum=sum(nb_fert,na.rm=T))
+  
   # proportion germinated
   data_proxy_germ <- data_flower %>%
     filter(!(is.na(nb_sown)|is.na(nb_germ))) %>%
@@ -253,6 +262,7 @@ get_data_proxy_id <- function(data_flower){
     summarise(mean_seed_weight=mean(seed_weight,na.rm=T))
   
   data_proxy_id <- data_proxy_ab |>
+    full_join(data_proxy_fert) |>
     full_join(data_proxy_ss) |>
     full_join(data_proxy_germ) |>
     full_join(data_proxy_weight) |>
@@ -278,7 +288,7 @@ get_data_proxy_id <- function(data_flower){
 get_data_final <- function(oms_gms_flower, oms_gms_id, data_flower, data_proxy_id){
   
   data_final_flower <- data_flower |> # only receptive flowers
-    select(id, id_flow, session, ttt, nb_ab, nb_ov, nb_seed, seed_weight, nb_sown, nb_germ, pl) |>
+    select(id, id_flow, session, ttt, nb_fert, nb_ab, nb_ov, nb_seed, seed_weight, nb_sown, nb_germ, pl) |>
     left_join(oms_gms_flower) |>
     filter(!is.na(oms)) # filter spontaneous selfing or obs error
   
@@ -502,6 +512,59 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
              predictor = "oms",
              proxy = "ss", .before = 1)
     
+    ### fert ----
+    model_fert_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl + ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + contact + ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_4b <- lme4::glmer(data = data_final_flower |> filter(!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_4c <- lme4::glmer(data = data_final_flower |> filter(!is.na(contact)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_6 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_7 <- lme4::glmer(data = data_final_flower |> filter(!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_8 <- lme4::glmer(data = data_final_flower |> filter(!is.na(contact)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    lrt_interoms_fert_oms <- anova(model_fert_oms_flower_0, model_fert_oms_flower_1) |> as.data.frame() # oms * ttt
+    lrt_interpl_fert_oms <- anova(model_fert_oms_flower_0, model_fert_oms_flower_2) |> as.data.frame() # pl * ttt
+    lrt_intercontact_fert_oms <- anova(model_fert_oms_flower_0, model_fert_oms_flower_3) |> as.data.frame() # oms * ttt
+    lrt_oms_fert_oms <- anova(model_fert_oms_flower_4, model_fert_oms_flower_5) |> as.data.frame() # oms
+    lrt_ttt_fert_oms <-anova(model_fert_oms_flower_4, model_fert_oms_flower_6) |> as.data.frame() # ttt
+    lrt_pl_fert_oms <-anova(model_fert_oms_flower_4b, model_fert_oms_flower_7) |> as.data.frame() # pl
+    lrt_contact_fert_oms <-anova(model_fert_oms_flower_4c, model_fert_oms_flower_8) |> as.data.frame() # contact
+    
+    lrt_fert_oms <- lrt_interoms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_interpl_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interpl", .before = 1)) |>
+      bind_rows(lrt_intercontact_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_pl_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "pl", .before = 1)) |> 
+      bind_rows(lrt_contact_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |> 
+      mutate(method = method_name, proxy = "fert", predictor = "oms", .before = 1)
+    
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_oms_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_low_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","pl","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_oms_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_medium_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in%  c("oms","pl","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_oms_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_high_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in%  c("oms","pl","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_oms <- estimate_low_fert_oms |>
+      bind_rows(estimate_medium_fert_oms) |>
+      bind_rows(estimate_high_fert_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "oms",
+             proxy = "fert", .before = 1)
+    
     ### germ ----
     model_germ_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
     model_germ_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms + ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
@@ -718,6 +781,60 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
              predictor = "q",
              proxy = "ss", .before = 1)
     
+    ### fert ----
+    model_fert_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl + ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + contact + ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_4b <- lme4::glmer(data = data_final_flower |> filter(!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_4c <- lme4::glmer(data = data_final_flower |> filter(!is.na(contact)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_4d <- lme4::glmer(data = data_final_flower |> filter(!is.na(ratio_q)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_5 <- lme4::glmer(data = data_final_flower  |> filter(!is.na(ratio_q)), cbind(nb_fert, nb_ov - nb_fert) ~ ttt + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_6 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + pl + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_7 <- lme4::glmer(data = data_final_flower |> filter(!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + contact + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_8 <- lme4::glmer(data = data_final_flower |> filter(!is.na(contact)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    lrt_interq_fert_q <- anova(model_fert_q_flower_0, model_fert_q_flower_1) |> as.data.frame() # ratio_q * ttt
+    lrt_interpl_fert_q <- anova(model_fert_q_flower_0, model_fert_q_flower_2) |> as.data.frame() # pl * ttt
+    lrt_intercontact_fert_q <- anova(model_fert_q_flower_0, model_fert_q_flower_3) |> as.data.frame() # ratio_q * ttt
+    lrt_q_fert_q <- anova(model_fert_q_flower_4d, model_fert_q_flower_5) |> as.data.frame() # ratio_q
+    lrt_ttt_fert_q <-anova(model_fert_q_flower_4, model_fert_q_flower_6) |> as.data.frame() # ttt
+    lrt_pl_fert_q <-anova(model_fert_q_flower_4b, model_fert_q_flower_7) |> as.data.frame() # pl
+    lrt_contact_fert_q <-anova(model_fert_q_flower_4c, model_fert_q_flower_8) |> as.data.frame() # contact
+    
+    lrt_fert_q <- lrt_interq_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_interpl_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interpl", .before = 1)) |>
+      bind_rows(lrt_intercontact_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_pl_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "pl", .before = 1)) |> 
+      bind_rows(lrt_contact_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |> 
+      mutate(method = method_name, proxy = "fert", predictor = "ratio_q", .before = 1)
+    
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_low_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","pl","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_q_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_medium_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in%  c("ratio_q","pl","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_q_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_high_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in%  c("ratio_q","pl","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_q <- estimate_low_fert_q |>
+      bind_rows(estimate_medium_fert_q) |>
+      bind_rows(estimate_high_fert_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "q",
+             proxy = "fert", .before = 1)
+    
     ### germ ----
     model_germ_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
     model_germ_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl * ttt + contact * ttt + (1|session) + (1|session:id), family = "binomial")
@@ -829,30 +946,38 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
     lrt_table <- lrt_q_oms |>
       bind_rows(lrt_ab_oms) |>
       bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_fert_oms) |>
       bind_rows(lrt_germ_oms) |>
       bind_rows(lrt_weight_oms) |>
       bind_rows(lrt_ab_q) |>
       bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_fert_q) |>
       bind_rows(lrt_germ_q) |>
       bind_rows(lrt_weight_q) |>
       rename(chisq = Chisq,
              df = Df,
              pvalue = "Pr(>Chisq)") |>
-      mutate(level = "flower", .before = 1)
+      mutate(level = "flower", .before = 1,
+             pvalue = round(pvalue, digits = 3))
     
     estimate_table <- estimate_q_oms |>
       bind_rows(estimate_ab_oms) |>
       bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_fert_oms) |>
       bind_rows(estimate_germ_oms) |>
       bind_rows(estimate_weight_oms) |>
       bind_rows(estimate_ab_q) |>
       bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_fert_q) |>
       bind_rows(estimate_germ_q) |>
       bind_rows(estimate_weight_q) |>
       select(-c("t value","z value")) |>
       rename(estimate = Estimate,
              se = "Std. Error") |>
-      mutate(level = "flower", .before = 1)
+      mutate(level = "flower", .before = 1,
+             pvalue = round(pvalue, digits = 3)) |>
+      mutate(ci_max = estimate + 1.96 * se,
+             ci_min = estimate - 1.96 * se)
     
   }else{
     
@@ -1002,6 +1127,54 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
       mutate(method = method_name,
              predictor = "oms",
              proxy = "ss", .before = 1)
+    
+    ### fert ----
+    model_fert_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_4 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_oms_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ oms + ttt + (1|session) + (1|session:id), family = "binomial")
+    lrt_interoms_fert_oms <- anova(model_fert_oms_flower_0, model_fert_oms_flower_1) |> as.data.frame() # oms * ttt
+    lrt_interpl_fert_oms <- anova(model_fert_oms_flower_0, model_fert_oms_flower_1) |> as.data.frame() # pl * ttt
+    lrt_oms_fert_oms <- anova(model_fert_oms_flower_3, model_fert_oms_flower_4) |> as.data.frame() # oms
+    lrt_ttt_fert_oms <-anova(model_fert_oms_flower_3, model_fert_oms_flower_5) |> as.data.frame() # ttt
+    lrt_pl_fert_oms <-anova(model_fert_oms_flower_3b, model_fert_oms_flower_6) |> as.data.frame() # pl
+    
+    lrt_fert_oms <- lrt_interoms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_interpl_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interpl", .before = 1)) |>
+      bind_rows(lrt_oms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_pl_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "pl", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "oms", .before = 1)
+    
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_oms_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_low_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","pl")) |> mutate(ttt = "low", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_oms_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_medium_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","pl")) |> mutate(ttt = "medium", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_oms_flower_best <-  lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_high_fert_oms <- summary(model_fert_oms_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","pl")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_oms <- estimate_low_fert_oms |>
+      bind_rows(estimate_medium_fert_oms) |>
+      bind_rows(estimate_high_fert_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "oms",
+             proxy = "fert", .before = 1)
     
     ### germ ----
     model_germ_oms_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ oms * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
@@ -1198,6 +1371,55 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
              predictor = "q",
              proxy = "ss", .before = 1)
     
+    ### fert ----
+    model_fert_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_2 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl + ttt + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_3 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_3a <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_3b <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_4 <- lme4::glmer(data = data_final_flower |> filter (!is.na(ratio_q)), cbind(nb_fert, nb_ov - nb_fert) ~ ttt + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_5 <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + pl + (1|session) + (1|session:id), family = "binomial")
+    model_fert_q_flower_6 <- lme4::glmer(data = data_final_flower |> filter (!is.na(pl)), cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q + ttt + (1|session) + (1|session:id), family = "binomial")
+    lrt_interq_fert_q <- anova(model_fert_q_flower_0, model_fert_q_flower_1) |> as.data.frame() # ratio_q * ttt
+    lrt_interpl_fert_q <- anova(model_fert_q_flower_0, model_fert_q_flower_1) |> as.data.frame() # pl * ttt
+    lrt_q_fert_q <- anova(model_fert_q_flower_3a, model_fert_q_flower_4) |> as.data.frame() # ratio_q
+    lrt_ttt_fert_q <-anova(model_fert_q_flower_3, model_fert_q_flower_5) |> as.data.frame() # ttt
+    lrt_pl_fert_q <-anova(model_fert_q_flower_3b, model_fert_q_flower_6) |> as.data.frame() # pl
+    
+    lrt_fert_q <- lrt_interq_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_interpl_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interpl", .before = 1)) |>
+      bind_rows(lrt_q_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_pl_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "pl", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "ratio_q", .before = 1)
+    
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_low_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","pl")) |> mutate(ttt = "low", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_medium_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","pl")) |> mutate(ttt = "medium", .before = 1)
+    data_final_flower <- data_final_flower |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_q_flower_best <- lme4::glmer(data = data_final_flower, cbind(nb_fert, nb_ov - nb_fert) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
+    estimate_high_fert_q <- summary(model_fert_q_flower_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","pl")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_q <- estimate_low_fert_q |>
+      bind_rows(estimate_medium_fert_q) |>
+      bind_rows(estimate_high_fert_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "q",
+             proxy = "fert", .before = 1)
+    
     ### germ ----
     model_germ_q_flower_0 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q * ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
     model_germ_q_flower_1 <- lme4::glmer(data = data_final_flower, cbind(nb_germ, nb_sown - nb_germ) ~ ratio_q + ttt + pl * ttt + (1|session) + (1|session:id), family = "binomial")
@@ -1299,30 +1521,38 @@ get_stat_flower <- function(data_final_flower, include_contact = FALSE){
     lrt_table <- lrt_q_oms |>
       bind_rows(lrt_ab_oms) |>
       bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_fert_oms) |>
       bind_rows(lrt_germ_oms) |>
       bind_rows(lrt_weight_oms) |>
       bind_rows(lrt_ab_q) |>
       bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_fert_q) |>
       bind_rows(lrt_germ_q) |>
       bind_rows(lrt_weight_q) |>
       rename(chisq = Chisq,
              df = Df,
              pvalue = "Pr(>Chisq)") |>
-      mutate(level = "flower", .before = 1)
+      mutate(level = "flower", .before = 1,
+             pvalue = round(pvalue, digits = 3))
     
     estimate_table <- estimate_q_oms |>
       bind_rows(estimate_ab_oms) |>
       bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_fert_oms) |>
       bind_rows(estimate_germ_oms) |>
       bind_rows(estimate_weight_oms) |>
       bind_rows(estimate_ab_q) |>
       bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_fert_q) |>
       bind_rows(estimate_germ_q) |>
       bind_rows(estimate_weight_q) |>
       select(-c("t value","z value")) |>
       rename(estimate = Estimate,
              se = "Std. Error") |>
-      mutate(level = "flower", .before = 1)
+      mutate(level = "flower", .before = 1,
+             pvalue = round(pvalue, digits = 3)) |>
+      mutate(ci_max = estimate + 1.96 * se,
+             ci_min = estimate - 1.96 * se)
     
   }
   
@@ -1490,6 +1720,53 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
       mutate(method = method_name,
              predictor = "oms",
              proxy = "ss", .before = 1)
+    
+    ### fert ----
+    model_fert_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    model_fert_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + ttt + contact * ttt + (1|session), family = "binomial")
+    model_fert_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + contact + ttt + (1|session), family = "binomial")
+    model_fert_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + ttt + contact + (1|session), family = "binomial")
+    model_fert_oms_id_4 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ttt + contact + (1|session), family = "binomial")
+    model_fert_oms_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + contact + (1|session), family = "binomial")
+    model_fert_oms_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + ttt + (1|session), family = "binomial")
+    lrt_interoms_fert_oms <- anova(model_fert_oms_id_0, model_fert_oms_id_1) |> as.data.frame() # oms * ttt
+    lrt_intercontact_fert_oms <- anova(model_fert_oms_id_0, model_fert_oms_id_2) |> as.data.frame() # contact * ttt
+    lrt_oms_fert_oms <- anova(model_fert_oms_id_3, model_fert_oms_id_4) |> as.data.frame() # oms
+    lrt_ttt_fert_oms <-anova(model_fert_oms_id_3, model_fert_oms_id_5) |> as.data.frame() # ttt
+    lrt_contact_fert_oms <-anova(model_fert_oms_id_3, model_fert_oms_id_6) |> as.data.frame() # contact
+    
+    lrt_fert_oms <- lrt_interoms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_intercontact_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_oms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("oms","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_oms <- estimate_low_fert_oms |>
+      bind_rows(estimate_medium_fert_oms) |>
+      bind_rows(estimate_high_fert_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "oms",
+             proxy = "fert", .before = 1)
     
     ### germ ----
     model_germ_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + contact * ttt + (1|session), family = "binomial")
@@ -1682,6 +1959,54 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
              predictor = "q",
              proxy = "ss", .before = 1)
     
+    ### fert ----
+    model_fert_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    model_fert_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + contact * ttt + (1|session), family = "binomial")
+    model_fert_q_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + contact + ttt + (1|session), family = "binomial")
+    model_fert_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_fert_q_id_3a <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + contact + (1|session), family = "binomial")
+    model_fert_q_id_4 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ttt + contact + (1|session), family = "binomial")
+    model_fert_q_id_5 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + contact + (1|session), family = "binomial")
+    model_fert_q_id_6 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + (1|session), family = "binomial")
+    lrt_interq_fert_q <- anova(model_fert_q_id_0, model_fert_q_id_1) |> as.data.frame() # ratio_q * ttt
+    lrt_intercontact_fert_q <- anova(model_fert_q_id_0, model_fert_q_id_2) |> as.data.frame() # contact * ttt
+    lrt_q_fert_q <- anova(model_fert_q_id_3a, model_fert_q_id_4) |> as.data.frame() # ratio_q
+    lrt_ttt_fert_q <-anova(model_fert_q_id_3, model_fert_q_id_5) |> as.data.frame() # ttt
+    lrt_contact_fert_q <-anova(model_fert_q_id_3, model_fert_q_id_6) |> as.data.frame() # contact
+    
+    lrt_fert_q <- lrt_interq_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_intercontact_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "intercontact", .before = 1)) |>
+      bind_rows(lrt_q_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      bind_rows(lrt_contact_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "contact", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_low_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_medium_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
+    estimate_high_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname %in% c("ratio_q","contact")) |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_q <- estimate_low_fert_q |>
+      bind_rows(estimate_medium_fert_q) |>
+      bind_rows(estimate_high_fert_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "q",
+             proxy = "fert", .before = 1)
+    
     ### germ ----
     model_germ_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + contact * ttt + (1|session), family = "binomial")
     model_germ_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + contact * ttt + (1|session), family = "binomial")
@@ -1781,30 +2106,38 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
     lrt_table <- lrt_q_oms |>
       bind_rows(lrt_ab_oms) |>
       bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_fert_oms) |>
       bind_rows(lrt_germ_oms) |>
       bind_rows(lrt_weight_oms) |>
       bind_rows(lrt_ab_q) |>
       bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_fert_q) |>
       bind_rows(lrt_germ_q) |>
       bind_rows(lrt_weight_q) |>
       rename(chisq = Chisq,
              df = Df,
              pvalue = "Pr(>Chisq)") |>
-      mutate(level = "id", .before = 1)
+      mutate(level = "id", .before = 1,
+             pvalue = round(pvalue, digits = 3))
     
     estimate_table <- estimate_q_oms |>
       bind_rows(estimate_ab_oms) |>
       bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_fert_oms) |>
       bind_rows(estimate_germ_oms) |>
       bind_rows(estimate_weight_oms) |>
       bind_rows(estimate_ab_q) |>
       bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_fert_q) |>
       bind_rows(estimate_germ_q) |>
       bind_rows(estimate_weight_q) |>
       select(-c("t value","z value")) |>
       rename(estimate = Estimate,
              se = "Std. Error") |>
-      mutate(level = "id", .before = 1)
+      mutate(level = "id", .before = 1,
+             pvalue = round(pvalue, digits = 3)) |>
+      mutate(ci_max = estimate + 1.96 * se,
+             ci_min = estimate - 1.96 * se)
     
     
   }else{
@@ -1932,6 +2265,46 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
       mutate(method = method_name,
              predictor = "oms",
              proxy = "ss", .before = 1)
+    
+    ### fert ----
+    model_fert_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + (1|session), family = "binomial")
+    model_fert_oms_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + ttt + (1|session), family = "binomial")
+    model_fert_oms_id_2 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ttt + (1|session), family = "binomial")
+    model_fert_oms_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms + (1|session), family = "binomial")
+    lrt_interoms_fert_oms <- anova(model_fert_oms_id_0, model_fert_oms_id_1) |> as.data.frame() # ns oms * ttt
+    lrt_oms_fert_oms <- anova(model_fert_oms_id_1, model_fert_oms_id_2) |> as.data.frame() # marg sin oms
+    lrt_ttt_fert_oms <-anova(model_fert_oms_id_1, model_fert_oms_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_fert_oms <- lrt_interoms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interoms", .before = 1) |>
+      bind_rows(lrt_oms_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "oms", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_oms |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "oms", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_low_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_medium_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_oms_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ oms * ttt + (1|session), family = "binomial")
+    estimate_high_fert_oms <- summary(model_fert_oms_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "oms") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_oms <- estimate_low_fert_oms |>
+      bind_rows(estimate_medium_fert_oms) |>
+      bind_rows(estimate_high_fert_oms) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "oms",
+             proxy = "fert", .before = 1)
     
     ### germ ----
     model_germ_oms_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ oms * ttt + (1|session), family = "binomial")
@@ -2096,6 +2469,47 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
              predictor = "q",
              proxy = "ss", .before = 1)
     
+    ### fert ----
+    model_fert_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + (1|session), family = "binomial")
+    model_fert_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_fert_q_id_1b <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + ttt + (1|session), family = "binomial")
+    model_fert_q_id_2 <- lme4::glmer(data = data_final_id |> filter(!is.na(ratio_q)), cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ttt + (1|session), family = "binomial")
+    model_fert_q_id_3 <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q + (1|session), family = "binomial")
+    lrt_interq_fert_q <- anova(model_fert_q_id_0, model_fert_q_id_1) |> as.data.frame() # ns ratio_q * ttt
+    lrt_q_fert_q <- anova(model_fert_q_id_1b, model_fert_q_id_2) |> as.data.frame() # marg sin ratio_q
+    lrt_ttt_fert_q <-anova(model_fert_q_id_1, model_fert_q_id_3) |> as.data.frame() # ns ttt
+    
+    lrt_fert_q <- lrt_interq_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "interq", .before = 1) |>
+      bind_rows(lrt_q_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ratio_q", .before = 1)) |>
+      bind_rows(lrt_ttt_fert_q |> slice(2) |> select(c("Chisq","Df","Pr(>Chisq)")) |> mutate(effect = "ttt", .before = 1)) |>
+      mutate(method = method_name,
+             proxy = "fert",
+             predictor = "ratio_q", .before = 1)
+    
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "low"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_low_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "low", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "medium"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_medium_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "medium", .before = 1)
+    data_final_id <- data_final_id |>
+      mutate(ttt=forcats::fct_relevel(ttt, "high"))
+    model_fert_q_id_best <- lme4::glmer(data = data_final_id, cbind(nb_fert_sum, nb_ov_sum_fert - nb_fert_sum) ~ ratio_q * ttt + (1|session), family = "binomial")
+    estimate_high_fert_q <- summary(model_fert_q_id_best)$coefficients |> as.data.frame() |> tibble::rownames_to_column() |>
+      filter(rowname == "ratio_q") |> mutate(ttt = "high", .before = 1)
+    
+    estimate_fert_q <- estimate_low_fert_q |>
+      bind_rows(estimate_medium_fert_q) |>
+      bind_rows(estimate_high_fert_q) |>
+      rename(pvalue = "Pr(>|z|)") |> 
+      mutate(method = method_name,
+             predictor = "q",
+             proxy = "fert", .before = 1)
+    
     ### germ ----
     model_germ_q_id_0 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q * ttt + (1|session), family = "binomial")
     model_germ_q_id_1 <- lme4::glmer(data = data_final_id, cbind(nb_germ_sum_germ, nb_sown_sum_germ - nb_germ_sum_germ) ~ ratio_q + ttt + (1|session), family = "binomial")
@@ -2181,29 +2595,38 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
     lrt_table <- lrt_q_oms |>
       bind_rows(lrt_ab_oms) |>
       bind_rows(lrt_ss_oms) |>
+      bind_rows(lrt_fert_oms) |>
       bind_rows(lrt_germ_oms) |>
       bind_rows(lrt_weight_oms) |>
       bind_rows(lrt_ab_q) |>
       bind_rows(lrt_ss_q) |>
+      bind_rows(lrt_fert_q) |>
       bind_rows(lrt_germ_q) |>
       bind_rows(lrt_weight_q) |>
       rename(chisq = Chisq,
              df = Df,
-             pvalue = "Pr(>Chisq)")
+             pvalue = "Pr(>Chisq)")  |>
+      mutate(level = "id", .before = 1,
+             pvalue = round(pvalue, digits = 3))
     
     estimate_table <- estimate_q_oms |>
       bind_rows(estimate_ab_oms) |>
       bind_rows(estimate_ss_oms) |>
+      bind_rows(estimate_fert_oms) |>
       bind_rows(estimate_germ_oms) |>
       bind_rows(estimate_weight_oms) |>
       bind_rows(estimate_ab_q) |>
       bind_rows(estimate_ss_q) |>
+      bind_rows(estimate_fert_q) |>
       bind_rows(estimate_germ_q) |>
       bind_rows(estimate_weight_q) |>
       select(-c("t value","z value")) |>
       rename(estimate = Estimate,
              se = "Std. Error")  |>
-      mutate(level = "id", .before = 1)
+      mutate(level = "id", .before = 1,
+             pvalue = round(pvalue, digits = 3)) |>
+      mutate(ci_max = estimate + 1.96 * se,
+             ci_min = estimate - 1.96 * se)
     
   }
   return(list(lrt_table = lrt_table,
@@ -2224,147 +2647,202 @@ get_stat_id <- function(data_final_id, include_contact = FALSE){
 
 get_results_plot <- function(stat_flower_wo_contact,stat_flower_w_contact,
                              stat_id_wo_contact,stat_id_w_contact){
-  
-  targets::tar_load(stat_flower_wo_contact)
-  targets::tar_load(stat_flower_w_contact)
-  targets::tar_load(stat_id_wo_contact)
-  targets::tar_load(stat_id_w_contact)
 
   table_wo_contact <- stat_flower_wo_contact$estimate_table |>
     bind_rows(stat_id_wo_contact$estimate_table) |>
     mutate(ttt = forcats::fct_relevel(ttt, "low","medium","high"),
-           proxy = forcats::fct_relevel(proxy, "q", "ab", "ss", "weight", "germ")) 
+           proxy = forcats::fct_relevel(proxy, "q", "fert","ab", "ss", "weight", "germ")) |>
+    filter(proxy != "q") 
   
   table_w_contact <- stat_flower_w_contact$estimate_table |>
     bind_rows(stat_id_w_contact$estimate_table) |>
     mutate(ttt = forcats::fct_relevel(ttt, "low","medium","high"),
-           proxy = forcats::fct_relevel(proxy, "q", "ab", "ss", "weight", "germ"),
-           rowname = forcats::fct_relevel(rowname, "oms","contact","pl"))
+           proxy = forcats::fct_relevel(proxy, "q", "fert","ab", "ss", "weight", "germ"),
+           rowname = forcats::fct_relevel(rowname, "oms","contact","pl")) |>
+    filter(proxy != "q") 
+  
+  table_q_oms <- stat_flower_wo_contact$estimate_table |>
+    bind_rows(stat_id_wo_contact$estimate_table) |>
+    bind_rows(stat_flower_w_contact$estimate_table) |>
+    bind_rows(stat_id_w_contact$estimate_table) |>
+    filter(proxy == "q")  |>
+    mutate(ttt = forcats::fct_relevel(ttt, "low","medium","high"),
+           rowname = forcats::fct_relevel(rowname, "oms","contact","pl")) 
  
    plot_wo_contact <- 
     ggplot(table_wo_contact |> filter(rowname != "pl"), aes(x = ttt, y = estimate, color = level))  +
       scale_color_manual(values = c("darkgoldenrod2","aquamarine4")) +
       geom_hline(yintercept = 0, color = "grey80") +
-      geom_errorbar(aes(ymin = estimate - se, ymax = estimate + se), width = 0, 
+      geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
                     linewidth = 2, position = position_dodge(0.4), lineend = "round") +      
       geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4)) +
-      facet_grid(
-        proxy ~ rowname,
-        scales = "free",
+     ggh4x::facet_grid2(
+        rowname ~ proxy,
+        scales = "free_y",
+        independent ="y",
         labeller = labeller(
           proxy = as_labeller(c(
             q = "Mate filtering",
+            fert = "Proportion of\nfert. ovules",
             ab = "Proportion of\naborted seeds",
             ss = "Seed-set",
             weight = "Mean seed weight",
-            germ = "Seed germination rate"
+            germ = "Seed germ. rate"
           )),
           rowname = as_labeller(c(
             oms = "PRE-POLL MATE",
-            ratio_q = "POST-POLL"
+            ratio_q = "POST-POLL MATE"
           )))) +
       theme_classic() +
-      theme(legend.position = "none")
+      theme(legend.position = "none") +
+     ggtitle("Mate effect at pre- vs. post-poll without contacts")
    
    plot_wo_contact_pl <-  
     ggplot(table_wo_contact |> filter(rowname == "pl"), aes(x = ttt, y = estimate))  +
       geom_hline(yintercept = 0, color = "grey80") +
-      geom_errorbar(aes(ymin = estimate - se, ymax = estimate + se), width = 0, 
+      geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
                     linewidth = 2, position = position_dodge(0.4), lineend = "round", color = "darkgoldenrod2") +      
       geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4), color = "darkgoldenrod2") +
-      facet_grid(
-        proxy ~ predictor,
-        scales = "free",
+      ggh4x::facet_grid2(
+        predictor ~ proxy,
+        scales = "free_y",
+        independent ="y",
         labeller = labeller(
           proxy = as_labeller(c(
             q = "Mate filtering",
+            fert = "Proportion of\nfert. ovules",
             ab = "Proportion of\naborted seeds",
             ss = "Seed-set",
             weight = "Mean seed weight",
-            germ = "Seed germination rate"
+            germ = "Seed germ. rate"
           )),
           predictor = as_labeller(c(
-            oms = "PRE-POLL",
-            q = "POST-POLL"
+            oms = "W. PRE-POLL MATE",
+            q = "W. POST-POLL MATE"
           )))) +
       theme_classic() +
-      theme(legend.position = "none")
+      theme(legend.position = "none") +
+     ggtitle("PL effect with pre- vs. post-poll without contacts")
    
    plot_w_contact <- 
      ggplot(table_w_contact |> filter(!rowname %in% c("pl","contact")), aes(x = ttt, y = estimate, color = level))  +
      scale_color_manual(values = c("darkgoldenrod2","aquamarine4")) +
      geom_hline(yintercept = 0, color = "grey80") +
-     geom_errorbar(aes(ymin = estimate - se, ymax = estimate + se), width = 0, 
+     geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
                    linewidth = 2, position = position_dodge(0.4), lineend = "round") +      
      geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4)) +
-     facet_grid(
-       proxy ~ rowname,
-       scales = "free",
+     ggh4x::facet_grid2(
+       rowname ~ proxy,
+       scales = "free_y",
+       independent ="y",
        labeller = labeller(
          proxy = as_labeller(c(
            q = "Mate filtering",
+           fert = "Proportion of\nfert. ovules",
            ab = "Proportion of\naborted seeds",
            ss = "Seed-set",
            weight = "Mean seed weight",
-           germ = "Seed germination rate"
+           germ = "Seed germ. rate"
          )),
          rowname = as_labeller(c(
            oms = "PRE-POLL MATE",
-           ratio_q = "POST-POLL"
+           ratio_q = "POST-POLL MATE"
          )))) +
      theme_classic() +
-     theme(legend.position = "none")
+     theme(legend.position = "none") +
+     ggtitle("Mate effect at pre- vs. post-poll with contacts")
    
    plot_w_contact_pl <-  
      ggplot(table_w_contact |> filter(rowname == "pl"), aes(x = ttt, y = estimate))  +
      geom_hline(yintercept = 0, color = "grey80") +
-     geom_errorbar(aes(ymin = estimate - se, ymax = estimate + se), width = 0, 
+     geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
                    linewidth = 2, position = position_dodge(0.4), lineend = "round", color = "darkgoldenrod2") +      
      geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4), color = "darkgoldenrod2") +
-     facet_grid(
-       proxy ~ predictor,
-       scales = "free",
+     ggh4x::facet_grid2(
+       predictor ~ proxy,
+       scales = "free_y",
+       independent ="y",
        labeller = labeller(
          proxy = as_labeller(c(
            q = "Mate filtering",
+           fert = "Proportion of\nfert. ovules",
            ab = "Proportion of\naborted seeds",
            ss = "Seed-set",
            weight = "Mean seed weight",
-           germ = "Seed germination rate"
+           germ = "Seed germ. rate"
          )),
          predictor = as_labeller(c(
-           oms = "PRE-POLL",
-           q = "POST-POLL"
+           oms = "W. PRE-POLL MATE",
+           q = "W. POST-POLL MATE"
          )))) +
      theme_classic() +
-     theme(legend.position = "none")
+     theme(legend.position = "none") +
+     ggtitle("PL effect with pre- vs. post-poll with contacts")
    
    plot_w_contact_contact <-  
-     ggplot(table_w_contact |> filter(rowname == "contact"), aes(x = ttt, y = estimate, color = level))  +
+     ggplot(table_w_contact |> filter(rowname == "contact"), 
+            aes(x = ttt, y = estimate, color = level))  +
      scale_color_manual(values = c("darkgoldenrod2","aquamarine4")) +
      geom_hline(yintercept = 0, color = "grey80") +
-     geom_errorbar(aes(ymin = estimate - se, ymax = estimate + se), width = 0, 
+     geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
+                   linewidth = 2, position = position_dodge(0.4), lineend = "round") +      
+     geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4)) +
+     ggh4x::facet_grid2(
+       predictor ~ proxy,
+       scales = "free_y",
+       independent ="y",
+       labeller = labeller(
+         proxy = as_labeller(c(
+           q = "Mate filtering",
+           fert = "Proportion of\nfert. ovules",
+           ab = "Proportion of\naborted seeds",
+           ss = "Seed-set",
+           weight = "Mean seed weight",
+           germ = "Seed germ. rate"
+         )),
+         predictor = as_labeller(c(
+           oms = "W. PRE-POLL MATE",
+           q = "W. POST-POLL MATE"
+         )))) +
+     theme_classic() +
+     theme(legend.position = "none") +
+     ggtitle("Contact effect with pre- vs. post-poll with contacts")
+   
+   plot_q_oms <-  
+     ggplot(table_q_oms, 
+            aes(x = ttt, y = estimate, color = level))  +
+     scale_color_manual(values = c("darkgoldenrod2","aquamarine4")) +
+     geom_hline(yintercept = 0, color = "grey80") +
+     geom_errorbar(aes(ymin = ci_min, ymax = ci_max), width = 0, 
                    linewidth = 2, position = position_dodge(0.4), lineend = "round") +      
      geom_point(shape = 21, size=3, fill = "white", position = position_dodge(0.4)) +
      facet_grid(
-       proxy ~ predictor,
+       rowname ~ method,
        scales = "free",
        labeller = labeller(
-         proxy = as_labeller(c(
-           q = "Mate filtering",
-           ab = "Proportion of\naborted seeds",
-           ss = "Seed-set",
-           weight = "Mean seed weight",
-           germ = "Seed germination rate"
+         method = as_labeller(c(
+           w_contact = "With contact",
+           wo_contact = "Without contact"
          )),
-         predictor = as_labeller(c(
-           oms = "PRE-POLL",
-           q = "POST-POLL"
-         )))) +
+         rowname = as_labeller(c(
+           oms = "PRE-POLL MATE",
+           contact = "PRE-POLL CONTACT",
+           pl = "PRE-POLL PL"
+         )))
+       ) +
      theme_classic() +
-     theme(legend.position = "none")
-  
-  return()
+     theme(legend.position = "none") +
+     ggtitle("Mate number effect on mate filtering")
+   
+   # retirer contact et pl en covariable de q car ce sont des estimateurs du pre-poll?
+   # interpréter plot_q_oms pour prendre une décision
+
+  return(list(plot_q_oms = plot_q_oms,
+         plot_wo_contact = plot_wo_contact,
+         plot_wo_contact_pl = plot_wo_contact_pl,
+         plot_w_contact = plot_w_contact,
+         plot_w_contact_pl = plot_w_contact_pl,
+         plot_w_contact_contact = plot_w_contact_contact))
 }
 
 #' #' Read data at the individual level
